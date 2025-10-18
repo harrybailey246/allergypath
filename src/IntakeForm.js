@@ -1,473 +1,479 @@
 // src/IntakeForm.js
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
-// ---------- Options ----------
-const SYMPTOM_OPTIONS = [
-  "Hives / Urticaria",
-  "Swelling / Angioedema",
-  "Wheeze / Chest tightness",
-  "Vomiting",
-  "Diarrhoea",
-  "Abdominal pain",
-  "Itchy throat",
-  "Dizziness / Faint",
-  "Anaphylaxis",
+// ---- tiny UI bits reused across steps ----
+const Page = ({ children }) => (
+  <div style={{ background: "white", border: "1px solid #eee", borderRadius: 12, padding: 16, maxWidth: 760, margin: "0 auto" }}>
+    {children}
+  </div>
+);
+const Row = ({ children }) => <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>{children}</div>;
+const Label = ({ children }) => <div style={{ fontWeight: 600, fontSize: 14 }}>{children}</div>;
+const Input = (props) => <input {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" }} />;
+const Textarea = (props) => <textarea {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", minHeight: 80 }} />;
+const Btn = ({ children, ...props }) => (
+  <button {...props} style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, background: "#fff", cursor: "pointer" }}>
+    {children}
+  </button>
+);
+const Pill = ({ active, onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    style={{
+      padding: "6px 10px",
+      borderRadius: 999,
+      border: "1px solid #ddd",
+      cursor: "pointer",
+      background: active ? "#111827" : "#fff",
+      color: active ? "#fff" : "#111827",
+    }}
+  >
+    {children}
+  </button>
+);
+
+const SYMPTOMS = [
+  "hives/urticaria",
+  "angioedema",
+  "wheezing/shortness of breath",
+  "vomiting",
+  "diarrhoea",
+  "abdominal pain",
+  "dizziness/fainting",
+  "throat tightness",
+  "lip/tongue swelling",
 ];
 
-const TRIGGER_OPTIONS = [
-  "Peanut",
-  "Tree nuts",
-  "Milk",
-  "Egg",
-  "Fish",
-  "Shellfish",
-  "Sesame",
-  "Soy",
-  "Wheat",
-  "Pollen",
-  "Dust mite",
-  "Animal dander",
-  "Exercise",
-  "NSAIDs",
-  "Latex",
-  "Unsure", // 👈 requested
+const FOOD_TRIGGERS = [
+  "peanut",
+  "tree nuts",
+  "milk",
+  "egg",
+  "wheat",
+  "soy",
+  "fish",
+  "shellfish",
+  "sesame",
+  "other",
+  "unsure", // <-- NEW: Unsure option
 ];
-
-const ASTHMA_CONTROL = [
-  "well-controlled",
-  "sometimes-uncontrolled",
-  "poorly-controlled",
-  "no-asthma",
-];
-
-// ---------- Helpers ----------
-function Label({ children }) {
-  return <div style={{ fontSize: 14, marginBottom: 6, fontWeight: 600 }}>{children}</div>;
-}
-
-function Section({ title, children }) {
-  return (
-    <div style={{ border: "1px solid #eee", background: "#fff", borderRadius: 10, padding: 12, marginBottom: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function CheckboxGroup({ options, values, onToggle }) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-      {options.map((opt) => {
-        const id = `chk-${opt.toLowerCase().replace(/\s+/g, "-")}`;
-        const checked = (values || []).some((v) => v?.toLowerCase() === opt.toLowerCase());
-        return (
-          <label key={opt} htmlFor={id} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
-            <input id={id} type="checkbox" checked={!!checked} onChange={() => onToggle(opt)} />
-            <span>{opt}</span>
-          </label>
-        );
-      })}
-    </div>
-  );
-}
-
-function Toggle({ label, checked, onChange }) {
-  return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14 }}>
-      <input type="checkbox" checked={!!checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-const input = { padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" };
-const btn = { padding: "8px 12px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
-const wrap = { maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif", color: "#111827" };
 
 export default function IntakeForm() {
-  // identity
-  const [firstName, setFirstName] = React.useState("");
-  const [surname, setSurname] = React.useState("");
-  const [email, setEmail] = React.useState("");
-  const [phone, setPhone] = React.useState("");
-  const [dob, setDob] = React.useState("");
-  const [nhsNumber, setNhsNumber] = React.useState("");
+  const [step, setStep] = useState(1);
+  const totalSteps = 6;
 
-  // clinical history
-  const [symptoms, setSymptoms] = React.useState([]);
-  const [onsetTime, setOnsetTime] = React.useState("");
-  const [reactionFrequency, setReactionFrequency] = React.useState("");
-  const [mostSevereReaction, setMostSevereReaction] = React.useState("");
+  // --- form state ----
+  const [first_name, setFirstName] = useState("");
+  const [surname, setSurname] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [date_of_birth, setDOB] = useState("");
 
-  // triggers
-  const [foodTriggers, setFoodTriggers] = React.useState([]);
-  const [otherTriggers, setOtherTriggers] = React.useState("");
+  const [nhs_number, setNhs] = useState("");
+  const [symptoms, setSymptoms] = useState([]);
+  const [onset_time, setOnsetTime] = useState("");
+  const [reaction_frequency, setReactionFrequency] = useState("");
+  const [most_severe_reaction, setMostSevere] = useState("");
 
-  // baked tolerance
-  const [bakedEgg, setBakedEgg] = React.useState(false);
-  const [bakedMilk, setBakedMilk] = React.useState(false);
+  const [food_triggers, setFoodTriggers] = useState([]);
+  const [other_triggers, setOtherTriggers] = useState("");
 
-  // comorbidities
-  const [asthmaControl, setAsthmaControl] = React.useState("no-asthma");
-  const [eczema, setEczema] = React.useState(false);
-  const [hayFever, setHayFever] = React.useState(false);
-  const [otherConditions, setOtherConditions] = React.useState("");
+  const [can_eat_baked_egg, setBakedEgg] = useState(false);
+  const [can_eat_baked_milk, setBakedMilk] = useState(false);
 
-  // medications / readiness
-  const [lastAntihistamine, setLastAntihistamine] = React.useState("");
-  const [betaBlocker, setBetaBlocker] = React.useState(false);
-  const [aceInhibitor, setAceInhibitor] = React.useState(false);
-  const [pregnant, setPregnant] = React.useState(false);
+  const [asthma_control, setAsthma] = useState("");
+  const [eczema, setEczema] = useState(false);
+  const [hay_fever, setHayFever] = useState(false);
+  const [other_conditions, setOtherConditions] = useState("");
 
-  // preparedness
-  const [hasAutoInjector, setHasAutoInjector] = React.useState(false);
-  const [carriesAutoInjector, setCarriesAutoInjector] = React.useState(false);
+  const [last_antihistamine, setLastAnti] = useState("");
+  const [taking_beta_blocker, setBB] = useState(false);
+  const [taking_ace_inhibitor, setACE] = useState(false);
+  const [pregnant, setPregnant] = useState(false);
 
-  // meta
-  const [confirmSubmission, setConfirmSubmission] = React.useState(false);
-  const [testNotes, setTestNotes] = React.useState("");
+  const [has_auto_injector, setHasAI] = useState(false);
+  const [carries_auto_injector, setCarriesAI] = useState(false);
 
-  // files (optional)
-  const [files, setFiles] = React.useState([]);
-  const [skippedUpload, setSkippedUpload] = React.useState(false);
+  const [confirm_submission, setConfirmSubmission] = useState(false);
+  const [test_notes, setTestNotes] = useState("");
+
+  // attachments (optional)
+  const [files, setFiles] = useState([]); // FileList -> we’ll copy to array
+  const [uploadSkipped, setUploadSkipped] = useState(false); // NEW: allow skipping upload
 
   // UX
-  const [submitting, setSubmitting] = React.useState(false);
-  const [okMsg, setOkMsg] = React.useState("");
-  const [errMsg, setErrMsg] = React.useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [okMsg, setOkMsg] = useState("");
+  const [errMsg, setErrMsg] = useState("");
 
-  const toggleSymptom = (val) =>
-    setSymptoms((prev) =>
-      prev.some((v) => v?.toLowerCase() === val.toLowerCase())
-        ? prev.filter((v) => v?.toLowerCase() !== val.toLowerCase())
-        : [...prev, val]
-    );
+  const canNext = useMemo(() => {
+    if (step === 1) {
+      return first_name && surname && email && phone;
+    }
+    if (step === 6) {
+      return confirm_submission;
+    }
+    return true;
+  }, [step, first_name, surname, email, phone, confirm_submission]);
 
-  const toggleTrigger = (val) =>
-    setFoodTriggers((prev) =>
-      prev.some((v) => v?.toLowerCase() === val.toLowerCase())
-        ? prev.filter((v) => v?.toLowerCase() !== val.toLowerCase())
-        : [...prev, val]
-    );
-
-  const resetForm = () => {
-    setFirstName("");
-    setSurname("");
-    setEmail("");
-    setPhone("");
-    setDob("");
-    setNhsNumber("");
-    setSymptoms([]);
-    setOnsetTime("");
-    setReactionFrequency("");
-    setMostSevereReaction("");
-    setFoodTriggers([]);
-    setOtherTriggers("");
-    setBakedEgg(false);
-    setBakedMilk(false);
-    setAsthmaControl("no-asthma");
-    setEczema(false);
-    setHayFever(false);
-    setOtherConditions("");
-    setLastAntihistamine("");
-    setBetaBlocker(false);
-    setAceInhibitor(false);
-    setPregnant(false);
-    setHasAutoInjector(false);
-    setCarriesAutoInjector(false);
-    setConfirmSubmission(false);
-    setTestNotes("");
-    setFiles([]);
-    setSkippedUpload(false);
+  const toggleArrayVal = (arr, setArr, val) => {
+    if (arr.includes(val)) setArr(arr.filter((v) => v !== val));
+    else setArr([...arr, val]);
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const goNext = () => setStep((s) => Math.min(totalSteps, s + 1));
+  const goPrev = () => setStep((s) => Math.max(1, s - 1));
+
+  // ---- submit handler ----
+  const handleSubmit = async () => {
+    setSubmitting(true);
     setErrMsg("");
     setOkMsg("");
 
-    // quick validation
-    if (!firstName.trim() || !surname.trim() || !email.trim() || !phone.trim()) {
-      setErrMsg("Please fill in first name, surname, email and phone.");
-      return;
-    }
-    if (!confirmSubmission) {
-      setErrMsg("Please tick the confirmation box before submitting.");
-      return;
-    }
-
-    setSubmitting(true);
     try {
-      // 1) Create submission FIRST (no uploads yet) — avoids mobile “record 'pick'…” errors
+      // 1) create submission first (so we have the id)
       const payload = {
-        first_name: firstName.trim(),
-        surname: surname.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        date_of_birth: dob || null,
-        nhs_number: nhsNumber || null,
+        first_name,
+        surname,
+        email,
+        phone,
+        date_of_birth: date_of_birth || null,
+        nhs_number: nhs_number || null,
 
         symptoms,
-        onset_time: onsetTime || null,
-        reaction_frequency: reactionFrequency || null,
-        most_severe_reaction: mostSevereReaction || null,
+        onset_time: onset_time || null,
+        reaction_frequency: reaction_frequency || null,
+        most_severe_reaction: most_severe_reaction || null,
 
-        food_triggers: foodTriggers,
-        other_triggers: otherTriggers || null,
+        food_triggers,
+        other_triggers: other_triggers || null,
 
-        can_eat_baked_egg: bakedEgg,
-        can_eat_baked_milk: bakedMilk,
+        can_eat_baked_egg,
+        can_eat_baked_milk,
 
-        asthma_control: asthmaControl,
+        asthma_control: asthma_control || null,
         eczema,
-        hay_fever: hayFever,
-        other_conditions: otherConditions || null,
+        hay_fever,
+        other_conditions: other_conditions || null,
 
-        last_antihistamine: lastAntihistamine ? new Date(lastAntihistamine).toISOString() : null,
-        taking_beta_blocker: betaBlocker,
-        taking_ace_inhibitor: aceInhibitor,
+        last_antihistamine: last_antihistamine ? new Date(last_antihistamine).toISOString() : null,
+        taking_beta_blocker,
+        taking_ace_inhibitor,
         pregnant,
 
-        has_auto_injector: hasAutoInjector,
-        carries_auto_injector: carriesAutoInjector,
+        has_auto_injector,
+        carries_auto_injector,
 
-        confirm_submission: true,
-        test_notes: testNotes || null,
+        confirm_submission,
+        test_notes: test_notes || null,
       };
 
+      // insert & return id (use .select().single() for portable returning)
       const { data: created, error: insertErr } = await supabase
         .from("submissions")
         .insert([payload])
-        .select()
+        .select("id")
         .single();
 
       if (insertErr) throw insertErr;
-
       const submissionId = created.id;
 
-      // 2) Optional: upload files (if user provided and didn't press skip)
-      let uploadedPaths = [];
-      if (!skippedUpload && files && files.length > 0) {
-        const bucket = supabase.storage.from("attachments");
-
-        // upload sequentially (mobile-friendly) to avoid weird concurrency issues
+      // 2) optional file uploads — ONLY if user selected files and didn’t skip
+      const uploadedPaths = [];
+      if (!uploadSkipped && files && files.length > 0) {
+        // “record 'pick' is not assigned yet” on phones typically happens when a
+        // picker object is used after it’s gone. We avoid that by reading from the
+        // plain <input type="file"> synchronously and uploading each File directly.
         for (const f of files) {
-          const cleanName = f.name.replace(/\s+/g, "_");
-          const path = `${submissionId}/${Date.now()}_${cleanName}`;
-          const { error: upErr } = await bucket.upload(path, f, { cacheControl: "3600", upsert: false });
+          // protect against nullish entries
+          if (!f || !f.name) continue;
+          const path = `${submissionId}/${Date.now()}_${sanitizeName(f.name)}`;
+          const { error: upErr } = await supabase.storage
+            .from("attachments")
+            .upload(path, f, { upsert: false });
+
           if (upErr) {
-            // Non-fatal; keep collecting others
-            console.warn("Upload failed for", f.name, upErr.message);
+            // don’t fail the entire submission if one file fails — just log
+            console.error("upload error", upErr);
           } else {
             uploadedPaths.push(path);
           }
         }
-
-        if (uploadedPaths.length > 0) {
-          const { error: patchErr } = await supabase
-            .from("submissions")
-            .update({ attachments: uploadedPaths })
-            .eq("id", submissionId);
-          if (patchErr) console.warn("Failed to patch attachments:", patchErr.message);
-        }
       }
 
-      setOkMsg("Thanks! Your information has been submitted.");
-      resetForm();
-    } catch (e1) {
-      console.error(e1);
-      setErrMsg(e1.message || "Submission failed. Please try again.");
+      // 3) store object paths on the row (so clinicians can generate signed URLs)
+      if (uploadedPaths.length > 0) {
+        await supabase
+          .from("submissions")
+          .update({ attachments: uploadedPaths })
+          .eq("id", submissionId);
+      }
+
+      setOkMsg("Thanks — your form was submitted successfully.");
+      // reset minimal fields; don’t force a full reset so users can review
+      setStep(1);
+      setFiles([]);
+      setUploadSkipped(false);
+      setConfirmSubmission(false);
+    } catch (e) {
+      console.error(e);
+      setErrMsg(e.message || "Sorry, something went wrong submitting your form.");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} style={wrap}>
-      <h1 style={{ margin: 0, marginBottom: 8 }}>Allergy Assessment Form</h1>
-      <p style={{ color: "#6b7280", marginTop: 0 }}>
-        Please complete as much as you can. File upload is optional — you can skip it.
-      </p>
+    <div style={{ maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
+      {/* progress */}
+      <div style={{ marginBottom: 12, color: "#6b7280" }}>
+        Step {step} of {totalSteps}
+      </div>
 
-      {errMsg && <div style={{ color: "#b91c1c", marginBottom: 8 }}>❌ {errMsg}</div>}
-      {okMsg && <div style={{ color: "#059669", marginBottom: 8 }}>✅ {okMsg}</div>}
+      {errMsg && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+          ❌ {errMsg}
+        </div>
+      )}
+      {okMsg && (
+        <div style={{ background: "#dcfce7", border: "1px solid #bbf7d0", color: "#14532d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+          ✅ {okMsg}
+        </div>
+      )}
 
-      <Section title="Patient details">
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-          <div>
-            <Label>First name*</Label>
-            <input style={input} value={firstName} onChange={(e) => setFirstName(e.target.value)} />
-          </div>
-          <div>
-            <Label>Surname*</Label>
-            <input style={input} value={surname} onChange={(e) => setSurname(e.target.value)} />
-          </div>
-        </div>
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-          <div>
-            <Label>Email*</Label>
-            <input type="email" style={input} value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div>
-            <Label>Phone*</Label>
-            <input type="tel" style={input} value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-        </div>
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-          <div>
+      {/* ====== STEP 1: Patient identity ====== */}
+      {step === 1 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Patient details</h2>
+          <Row>
+            <Label>First name</Label>
+            <Input value={first_name} onChange={(e) => setFirstName(e.target.value)} />
+          </Row>
+          <Row>
+            <Label>Surname</Label>
+            <Input value={surname} onChange={(e) => setSurname(e.target.value)} />
+          </Row>
+          <Row>
+            <Label>Email</Label>
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Row>
+          <Row>
+            <Label>Phone</Label>
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </Row>
+          <Row>
             <Label>Date of birth</Label>
-            <input type="date" style={input} value={dob} onChange={(e) => setDob(e.target.value)} />
-          </div>
-          <div>
+            <Input type="date" value={date_of_birth} onChange={(e) => setDOB(e.target.value)} />
+          </Row>
+          <Row>
             <Label>NHS number (optional)</Label>
-            <input style={input} value={nhsNumber} onChange={(e) => setNhsNumber(e.target.value)} />
+            <Input value={nhs_number} onChange={(e) => setNhs(e.target.value)} />
+          </Row>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn disabled>← Back</Btn>
+            <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
           </div>
-        </div>
-      </Section>
+        </Page>
+      )}
 
-      <Section title="Symptoms & history">
-        <Label>Symptoms experienced</Label>
-        <CheckboxGroup options={SYMPTOM_OPTIONS} values={symptoms} onToggle={toggleSymptom} />
+      {/* ====== STEP 2: Symptoms & history ====== */}
+      {step === 2 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Symptoms & reaction history</h2>
 
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr", marginTop: 8 }}>
-          <div>
-            <Label>When did reactions start?</Label>
-            <input style={input} value={onsetTime} onChange={(e) => setOnsetTime(e.target.value)} placeholder="e.g. 2 years ago" />
-          </div>
-          <div>
-            <Label>How often?</Label>
-            <input style={input} value={reactionFrequency} onChange={(e) => setReactionFrequency(e.target.value)} placeholder="e.g. monthly" />
-          </div>
-        </div>
-
-        <div style={{ marginTop: 8 }}>
-          <Label>Most severe reaction (free text)</Label>
-          <textarea style={{ ...input, minHeight: 70 }} value={mostSevereReaction} onChange={(e) => setMostSevereReaction(e.target.value)} />
-        </div>
-      </Section>
-
-      <Section title="Food & other triggers">
-        <Label>Possible triggers (tick all that apply)</Label>
-        <CheckboxGroup options={TRIGGER_OPTIONS} values={foodTriggers} onToggle={toggleTrigger} />
-        <div style={{ marginTop: 8 }}>
-          <Label>Other triggers</Label>
-          <input style={input} value={otherTriggers} onChange={(e) => setOtherTriggers(e.target.value)} placeholder="e.g. cold air, alcohol" />
-        </div>
-      </Section>
-
-      <Section title="Baked tolerance">
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Toggle label="Can eat baked egg" checked={bakedEgg} onChange={setBakedEgg} />
-          <Toggle label="Can eat baked milk" checked={bakedMilk} onChange={setBakedMilk} />
-        </div>
-      </Section>
-
-      <Section title="Comorbidities">
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-          <div>
-            <Label>Asthma control</Label>
-            <select style={input} value={asthmaControl} onChange={(e) => setAsthmaControl(e.target.value)}>
-              {ASTHMA_CONTROL.map((o) => (
-                <option key={o} value={o}>{o}</option>
+          <Row>
+            <Label>Symptoms (select all that apply)</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {SYMPTOMS.map((s) => (
+                <Pill key={s} active={symptoms.includes(s)} onClick={() => toggleArrayVal(symptoms, setSymptoms, s)}>
+                  {s}
+                </Pill>
               ))}
-            </select>
+            </div>
+          </Row>
+
+          <Row>
+            <Label>When did reactions start?</Label>
+            <Input value={onset_time} onChange={(e) => setOnsetTime(e.target.value)} placeholder="e.g. 6 months ago" />
+          </Row>
+
+          <Row>
+            <Label>How often do reactions occur?</Label>
+            <Input value={reaction_frequency} onChange={(e) => setReactionFrequency(e.target.value)} placeholder="e.g. monthly" />
+          </Row>
+
+          <Row>
+            <Label>Most severe reaction (brief description)</Label>
+            <Textarea value={most_severe_reaction} onChange={(e) => setMostSevere(e.target.value)} />
+          </Row>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn onClick={goPrev}>← Back</Btn>
+            <Btn onClick={goNext}>Next →</Btn>
           </div>
-          <div>
+        </Page>
+      )}
+
+      {/* ====== STEP 3: Triggers & baked tolerance ====== */}
+      {step === 3 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Possible triggers</h2>
+
+          <Row>
+            <Label>Food triggers (select all that apply)</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {FOOD_TRIGGERS.map((t) => (
+                <Pill key={t} active={food_triggers.includes(t)} onClick={() => toggleArrayVal(food_triggers, setFoodTriggers, t)}>
+                  {t}
+                </Pill>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Tip: choose <b>“unsure”</b> if you’re not certain yet.
+            </div>
+          </Row>
+
+          {food_triggers.includes("other") && (
+            <Row>
+              <Label>Other triggers</Label>
+              <Input value={other_triggers} onChange={(e) => setOtherTriggers(e.target.value)} placeholder="e.g. chickpea, lupin" />
+            </Row>
+          )}
+
+          <Row>
+            <Label>Baked tolerance (optional)</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill active={can_eat_baked_egg} onClick={() => setBakedEgg((v) => !v)}>Can eat baked egg</Pill>
+              <Pill active={can_eat_baked_milk} onClick={() => setBakedMilk((v) => !v)}>Can eat baked milk</Pill>
+            </div>
+          </Row>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn onClick={goPrev}>← Back</Btn>
+            <Btn onClick={goNext}>Next →</Btn>
+          </div>
+        </Page>
+      )}
+
+      {/* ====== STEP 4: Comorbidities & readiness ====== */}
+      {step === 4 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Health & medications</h2>
+
+          <Row>
+            <Label>Asthma control</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {["well-controlled", "sometimes-uncontrolled", "poorly-controlled", "none"].map((a) => (
+                <Pill key={a} active={asthma_control === a} onClick={() => setAsthma(a)}>{a}</Pill>
+              ))}
+            </div>
+          </Row>
+
+          <Row>
             <Label>Other conditions</Label>
-            <input style={input} value={otherConditions} onChange={(e) => setOtherConditions(e.target.value)} placeholder="optional" />
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
-          <Toggle label="Eczema" checked={eczema} onChange={setEczema} />
-          <Toggle label="Hay fever" checked={hayFever} onChange={setHayFever} />
-        </div>
-      </Section>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill active={eczema} onClick={() => setEczema((v) => !v)}>Eczema</Pill>
+              <Pill active={hay_fever} onClick={() => setHayFever((v) => !v)}>Hay fever</Pill>
+            </div>
+            <Textarea value={other_conditions} onChange={(e) => setOtherConditions(e.target.value)} placeholder="Add any other relevant conditions" />
+          </Row>
 
-      <Section title="Medications & readiness">
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-          <div>
-            <Label>Last antihistamine</Label>
+          <Row>
+            <Label>Last antihistamine taken (date & time)</Label>
+            <Input type="datetime-local" value={last_antihistamine} onChange={(e) => setLastAnti(e.target.value)} />
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              (We usually need at least 72 hours without antihistamines before skin prick testing.)
+            </div>
+          </Row>
+
+          <Row>
+            <Label>Medications & status</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill active={taking_beta_blocker} onClick={() => setBB((v) => !v)}>Taking beta-blocker</Pill>
+              <Pill active={taking_ace_inhibitor} onClick={() => setACE((v) => !v)}>Taking ACE inhibitor</Pill>
+              <Pill active={pregnant} onClick={() => setPregnant((v) => !v)}>Pregnant</Pill>
+            </div>
+          </Row>
+
+          <Row>
+            <Label>Adrenaline auto-injector</Label>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Pill active={has_auto_injector} onClick={() => setHasAI((v) => !v)}>I have one</Pill>
+              <Pill active={carries_auto_injector} onClick={() => setCarriesAI((v) => !v)}>I carry it with me</Pill>
+            </div>
+          </Row>
+
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <Btn onClick={goPrev}>← Back</Btn>
+            <Btn onClick={goNext}>Next →</Btn>
+          </div>
+        </Page>
+      )}
+
+      {/* ====== STEP 5: Attachments (optional) ====== */}
+      {step === 5 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
+          <p style={{ color: "#6b7280", marginTop: 0 }}>
+            You can upload photos of rashes, previous letters, or test results. This step is optional — you can also <b>skip</b> it.
+          </p>
+
+          <Row>
+            <Label>Files</Label>
             <input
-              type="datetime-local"
-              style={input}
-              value={lastAntihistamine}
-              onChange={(e) => setLastAntihistamine(e.target.value)}
+              type="file"
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files || []))}
+              style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", background: "#fff" }}
             />
-          </div>
-          <div>
-            <Label>Pregnant</Label>
-            <select style={input} value={pregnant ? "yes" : "no"} onChange={(e) => setPregnant(e.target.value === "yes")}>
-              <option value="no">No / N/A</option>
-              <option value="yes">Yes</option>
-            </select>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
-          <Toggle label="Taking beta-blocker" checked={betaBlocker} onChange={setBetaBlocker} />
-          <Toggle label="Taking ACE inhibitor" checked={aceInhibitor} onChange={setAceInhibitor} />
-        </div>
-      </Section>
+            {files?.length > 0 && (
+              <div style={{ fontSize: 12, color: "#6b7280" }}>{files.length} file(s) selected</div>
+            )}
+          </Row>
 
-      <Section title="Preparedness">
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-          <Toggle label="Has auto-injector" checked={hasAutoInjector} onChange={setHasAutoInjector} />
-          <Toggle label="Carries auto-injector" checked={carriesAutoInjector} onChange={setCarriesAutoInjector} />
-        </div>
-      </Section>
-
-      <Section title="Attach photos or documents (optional)">
-        <div style={{ display: "grid", gap: 8 }}>
-          <input
-            type="file"
-            multiple
-            onChange={(e) => {
-              setFiles(Array.from(e.target.files || []));
-              setSkippedUpload(false);
-            }}
-          />
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              style={btn}
-              onClick={() => {
-                setFiles([]);
-                setSkippedUpload(true); // 👈 user explicitly chooses to skip
-              }}
-            >
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn onClick={() => { setFiles([]); setUploadSkipped(true); goNext(); }}>
               Skip upload
-            </button>
-            <span style={{ fontSize: 12, color: "#6b7280" }}>
-              {skippedUpload
-                ? "You chose to skip file upload."
-                : files.length
-                ? `${files.length} file(s) selected`
-                : "No files selected (optional)"}
-            </span>
+            </Btn>
+            <Btn onClick={goPrev}>← Back</Btn>
+            <Btn onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
           </div>
-          <div>
-            <Label>Anything else you want us to know? (optional)</Label>
-            <textarea
-              style={{ ...input, minHeight: 70 }}
-              value={testNotes}
-              onChange={(e) => setTestNotes(e.target.value)}
-            />
+        </Page>
+      )}
+
+      {/* ====== STEP 6: Review & submit ====== */}
+      {step === 6 && (
+        <Page>
+          <h2 style={{ marginTop: 0 }}>Review & submit</h2>
+
+          <Row>
+            <Label>Any final notes for the clinic? (optional)</Label>
+            <Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} placeholder="Add anything else you want us to know" />
+          </Row>
+
+          <Row>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
+              I confirm the information above is accurate to the best of my knowledge.
+            </label>
+          </Row>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn onClick={goPrev}>← Back</Btn>
+            <Btn disabled={!confirm_submission || submitting} onClick={handleSubmit}>
+              {submitting ? "Submitting…" : "Submit form"}
+            </Btn>
           </div>
-        </div>
-      </Section>
-
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8 }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <input type="checkbox" checked={confirmSubmission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
-          <span>I confirm the above details are accurate to the best of my knowledge.</span>
-        </label>
-      </div>
-
-      <div style={{ marginTop: 12 }}>
-        <button disabled={submitting} type="submit" style={btn}>
-          {submitting ? "Submitting…" : "Submit form"}
-        </button>
-      </div>
-    </form>
+        </Page>
+      )}
+    </div>
   );
+}
+
+// simple filename sanitiser
+function sanitizeName(name) {
+  return name.replace(/[^\w.\-]+/g, "_");
 }
