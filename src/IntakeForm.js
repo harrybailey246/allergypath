@@ -2,7 +2,7 @@
 import React, { useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
 
-// ---- tiny UI bits reused across steps ----
+/* ---------- tiny UI bits ---------- */
 const Page = ({ children }) => (
   <div style={{ background: "white", border: "1px solid #eee", borderRadius: 12, padding: 16, maxWidth: 760, margin: "0 auto" }}>
     {children}
@@ -10,6 +10,8 @@ const Page = ({ children }) => (
 );
 const Row = ({ children }) => <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>{children}</div>;
 const Label = ({ children }) => <div style={{ fontWeight: 600, fontSize: 14 }}>{children}</div>;
+const Help = ({ children }) => <div style={{ fontSize: 12, color: "#6b7280" }}>{children}</div>;
+const ErrorText = ({ children }) => <div style={{ color: "#b91c1c", fontSize: 13 }}>{children}</div>;
 const Input = (props) => <input {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" }} />;
 const Textarea = (props) => <textarea {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", minHeight: 80 }} />;
 const Btn = ({ children, ...props }) => (
@@ -34,6 +36,7 @@ const Pill = ({ active, onClick, children }) => (
   </button>
 );
 
+/* ---------- constants ---------- */
 const SYMPTOMS = [
   "hives/urticaria",
   "angioedema",
@@ -57,95 +60,126 @@ const FOOD_TRIGGERS = [
   "shellfish",
   "sesame",
   "other",
-  "unsure", // <-- NEW: Unsure option
+  "unsure", // ✅ NEW (counts as a valid selection)
 ];
 
+/* ---------- component ---------- */
 export default function IntakeForm() {
   const [step, setStep] = useState(1);
   const totalSteps = 6;
 
-  // --- form state ----
+  // patient details
   const [first_name, setFirstName] = useState("");
   const [surname, setSurname] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [date_of_birth, setDOB] = useState("");
-
   const [nhs_number, setNhs] = useState("");
+
+  // history
   const [symptoms, setSymptoms] = useState([]);
   const [onset_time, setOnsetTime] = useState("");
   const [reaction_frequency, setReactionFrequency] = useState("");
   const [most_severe_reaction, setMostSevere] = useState("");
 
+  // triggers
   const [food_triggers, setFoodTriggers] = useState([]);
   const [other_triggers, setOtherTriggers] = useState("");
-
   const [can_eat_baked_egg, setBakedEgg] = useState(false);
   const [can_eat_baked_milk, setBakedMilk] = useState(false);
 
+  // health
   const [asthma_control, setAsthma] = useState("");
   const [eczema, setEczema] = useState(false);
   const [hay_fever, setHayFever] = useState(false);
   const [other_conditions, setOtherConditions] = useState("");
-
   const [last_antihistamine, setLastAnti] = useState("");
   const [taking_beta_blocker, setBB] = useState(false);
   const [taking_ace_inhibitor, setACE] = useState(false);
   const [pregnant, setPregnant] = useState(false);
-
   const [has_auto_injector, setHasAI] = useState(false);
   const [carries_auto_injector, setCarriesAI] = useState(false);
 
+  // attachments (optional)
+  const [files, setFiles] = useState([]);
+  const [uploadSkipped, setUploadSkipped] = useState(false);
+
+  // review / submit
   const [confirm_submission, setConfirmSubmission] = useState(false);
   const [test_notes, setTestNotes] = useState("");
-
-  // attachments (optional)
-  const [files, setFiles] = useState([]); // FileList -> we’ll copy to array
-  const [uploadSkipped, setUploadSkipped] = useState(false); // NEW: allow skipping upload
 
   // UX
   const [submitting, setSubmitting] = useState(false);
   const [okMsg, setOkMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
-
-  const canNext = useMemo(() => {
-    if (step === 1) {
-      return first_name && surname && email && phone;
-    }
-    if (step === 6) {
-      return confirm_submission;
-    }
-    return true;
-  }, [step, first_name, surname, email, phone, confirm_submission]);
+  const [errors, setErrors] = useState({}); // ✅ inline errors per step
 
   const toggleArrayVal = (arr, setArr, val) => {
     if (arr.includes(val)) setArr(arr.filter((v) => v !== val));
     else setArr([...arr, val]);
   };
 
-  const goNext = () => setStep((s) => Math.min(totalSteps, s + 1));
+  /* ---------- validation ---------- */
+  function validateStep(s) {
+    const e = {};
+    if (s === 1) {
+      if (!first_name.trim()) e.first_name = "First name is required.";
+      if (!surname.trim()) e.surname = "Surname is required.";
+      if (!date_of_birth) e.date_of_birth = "Date of birth is required.";
+      if (!email.trim()) e.email = "Email is required.";
+      else if (!/^\S+@\S+\.\S+$/.test(email)) e.email = "Enter a valid email.";
+      if (!phone.trim()) e.phone = "Phone is required.";
+    }
+    if (s === 2) {
+      if (!symptoms.length) e.symptoms = "Select at least one symptom.";
+      if (!most_severe_reaction.trim()) e.most_severe_reaction = "Please describe the most severe reaction.";
+    }
+    if (s === 3) {
+      // at least one trigger, "unsure" counts as valid
+      if (!food_triggers.length) e.food_triggers = "Select at least one trigger (you can choose “unsure”).";
+      if (food_triggers.includes("other") && !other_triggers.trim()) {
+        e.other_triggers = "Please describe the other trigger.";
+      }
+    }
+    if (s === 6) {
+      if (!confirm_submission) e.confirm = "Please confirm your information is accurate.";
+    }
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  const canNext = useMemo(() => {
+    if (step === 1) return first_name && surname && email && phone && date_of_birth;
+    if (step === 2) return symptoms.length > 0 && most_severe_reaction.trim().length > 0;
+    if (step === 3) return food_triggers.length > 0 && (!food_triggers.includes("other") || other_triggers.trim().length > 0);
+    if (step === 6) return confirm_submission && !submitting;
+    return true;
+  }, [step, first_name, surname, email, phone, date_of_birth, symptoms, most_severe_reaction, food_triggers, other_triggers, confirm_submission, submitting]);
+
+  const goNext = () => {
+    if (validateStep(step)) setStep((s) => Math.min(totalSteps, s + 1));
+  };
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
-  // ---- submit handler ----
-  const handleSubmit = async () => {
-    setSubmitting(true);
-    setErrMsg("");
-    setOkMsg("");
+  async function handleSubmit() {
+    if (!validateStep(6)) return;
 
+    setSubmitting(true);
+    setOkMsg("");
+    setErrMsg("");
     try {
-      // 1) create submission first (so we have the id)
       const payload = {
         first_name,
         surname,
         email,
         phone,
-        date_of_birth: date_of_birth || null,
+        date_of_birth, // keep as YYYY-MM-DD (backend can store as text/date)
         nhs_number: nhs_number || null,
 
         symptoms,
         onset_time: onset_time || null,
         reaction_frequency: reaction_frequency || null,
-        most_severe_reaction: most_severe_reaction || null,
+        most_severe_reaction,
 
         food_triggers,
         other_triggers: other_triggers || null,
@@ -166,71 +200,265 @@ export default function IntakeForm() {
         has_auto_injector,
         carries_auto_injector,
 
-        confirm_submission,
         test_notes: test_notes || null,
       };
 
-      // insert & return id (use .select().single() for portable returning)
-      const { data: created, error: insertErr } = await supabase
+      // 1) create record first
+      const { data: created, error: insErr } = await supabase
         .from("submissions")
         .insert([payload])
         .select("id")
         .single();
 
-      if (insertErr) throw insertErr;
+      if (insErr) throw insErr;
       const submissionId = created.id;
 
-      // 2) optional file uploads — ONLY if user selected files and didn’t skip
-      const uploadedPaths = [];
+      // 2) optional upload (avoid “record 'pick' is not assigned yet” by ensuring target id exists first)
+      const uploaded = [];
       if (!uploadSkipped && files && files.length > 0) {
-        // “record 'pick' is not assigned yet” on phones typically happens when a
-        // picker object is used after it’s gone. We avoid that by reading from the
-        // plain <input type="file"> synchronously and uploading each File directly.
         for (const f of files) {
-          // protect against nullish entries
           if (!f || !f.name) continue;
           const path = `${submissionId}/${Date.now()}_${sanitizeName(f.name)}`;
-          const { error: upErr } = await supabase.storage
-            .from("attachments")
-            .upload(path, f, { upsert: false });
-
-          if (upErr) {
-            // don’t fail the entire submission if one file fails — just log
-            console.error("upload error", upErr);
-          } else {
-            uploadedPaths.push(path);
-          }
+          const { error: upErr } = await supabase.storage.from("attachments").upload(path, f);
+          if (!upErr) uploaded.push(path);
         }
       }
 
-      // 3) store object paths on the row (so clinicians can generate signed URLs)
-      if (uploadedPaths.length > 0) {
-        await supabase
-          .from("submissions")
-          .update({ attachments: uploadedPaths })
-          .eq("id", submissionId);
+      if (uploaded.length) {
+        await supabase.from("submissions").update({ attachments: uploaded }).eq("id", submissionId);
       }
 
       setOkMsg("Thanks — your form was submitted successfully.");
-      // reset minimal fields; don’t force a full reset so users can review
+      // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
       setUploadSkipped(false);
       setConfirmSubmission(false);
+      setFirstName(""); setSurname(""); setEmail(""); setPhone(""); setDOB(""); setNhs("");
+      setSymptoms([]); setOnsetTime(""); setReactionFrequency(""); setMostSevere("");
+      setFoodTriggers([]); setOtherTriggers(""); setBakedEgg(false); setBakedMilk(false);
+      setAsthma(""); setEczema(false); setHayFever(false); setOtherConditions("");
+      setLastAnti(""); setBB(false); setACE(false); setPregnant(false);
+      setHasAI(false); setCarriesAI(false); setTestNotes("");
+      setErrors({});
     } catch (e) {
       console.error(e);
-      setErrMsg(e.message || "Sorry, something went wrong submitting your form.");
+      setErrMsg(e.message || "Sorry, something went wrong.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  /* ---------- only render ONE step via switch ---------- */
+  const renderStep = () => {
+    switch (step) {
+      case 1:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Patient details</h2>
+
+            <Row>
+              <Label>First name *</Label>
+              <Input value={first_name} onChange={(e) => setFirstName(e.target.value)} />
+              {errors.first_name && <ErrorText>{errors.first_name}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>Surname *</Label>
+              <Input value={surname} onChange={(e) => setSurname(e.target.value)} />
+              {errors.surname && <ErrorText>{errors.surname}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>Email *</Label>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              {errors.email && <ErrorText>{errors.email}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>Phone *</Label>
+              <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+              {errors.phone && <ErrorText>{errors.phone}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>Date of birth *</Label>
+              <Input type="date" value={date_of_birth} onChange={(e) => setDOB(e.target.value)} />
+              {errors.date_of_birth && <ErrorText>{errors.date_of_birth}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>NHS number (optional)</Label>
+              <Input value={nhs_number} onChange={(e) => setNhs(e.target.value)} />
+            </Row>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn disabled>← Back</Btn>
+              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+            </div>
+          </Page>
+        );
+
+      case 2:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Symptoms & reaction history</h2>
+            <Row>
+              <Label>Symptoms * (select all that apply)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {SYMPTOMS.map((s) => (
+                  <Pill key={s} active={symptoms.includes(s)} onClick={() => toggleArrayVal(symptoms, setSymptoms, s)}>
+                    {s}
+                  </Pill>
+                ))}
+              </div>
+              {errors.symptoms && <ErrorText>{errors.symptoms}</ErrorText>}
+            </Row>
+            <Row>
+              <Label>When did reactions start? (optional)</Label>
+              <Input value={onset_time} onChange={(e) => setOnsetTime(e.target.value)} placeholder="e.g. 6 months ago" />
+            </Row>
+            <Row>
+              <Label>How often do reactions occur? (optional)</Label>
+              <Input value={reaction_frequency} onChange={(e) => setReactionFrequency(e.target.value)} placeholder="e.g. monthly" />
+            </Row>
+            <Row>
+              <Label>Most severe reaction *</Label>
+              <Textarea value={most_severe_reaction} onChange={(e) => setMostSevere(e.target.value)} />
+              {errors.most_severe_reaction && <ErrorText>{errors.most_severe_reaction}</ErrorText>}
+            </Row>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={goPrev}>← Back</Btn>
+              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+            </div>
+          </Page>
+        );
+
+      case 3:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Possible triggers</h2>
+            <Row>
+              <Label>Food triggers * (select all that apply)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {FOOD_TRIGGERS.map((t) => (
+                  <Pill key={t} active={food_triggers.includes(t)} onClick={() => toggleArrayVal(food_triggers, setFoodTriggers, t)}>
+                    {t}
+                  </Pill>
+                ))}
+              </div>
+              <Help>Choose <b>“unsure”</b> if you’re not certain.</Help>
+              {errors.food_triggers && <ErrorText>{errors.food_triggers}</ErrorText>}
+            </Row>
+            {food_triggers.includes("other") && (
+              <Row>
+                <Label>Other triggers *</Label>
+                <Input value={other_triggers} onChange={(e) => setOtherTriggers(e.target.value)} placeholder="e.g. chickpea" />
+                {errors.other_triggers && <ErrorText>{errors.other_triggers}</ErrorText>}
+              </Row>
+            )}
+            <Row>
+              <Label>Baked tolerance (optional)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Pill active={can_eat_baked_egg} onClick={() => setBakedEgg((v) => !v)}>Can eat baked egg</Pill>
+                <Pill active={can_eat_baked_milk} onClick={() => setBakedMilk((v) => !v)}>Can eat baked milk</Pill>
+              </div>
+            </Row>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={goPrev}>← Back</Btn>
+              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+            </div>
+          </Page>
+        );
+
+      case 4:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Health & medications</h2>
+            <Row>
+              <Label>Asthma control (optional)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {["well-controlled", "sometimes-uncontrolled", "poorly-controlled", "none"].map((a) => (
+                  <Pill key={a} active={asthma_control === a} onClick={() => setAsthma(a)}>{a}</Pill>
+                ))}
+              </div>
+            </Row>
+            <Row>
+              <Label>Other conditions (optional)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Pill active={eczema} onClick={() => setEczema((v) => !v)}>Eczema</Pill>
+                <Pill active={hay_fever} onClick={() => setHayFever((v) => !v)}>Hay fever</Pill>
+              </div>
+              <Textarea value={other_conditions} onChange={(e) => setOtherConditions(e.target.value)} placeholder="Add any other relevant conditions" />
+            </Row>
+            <Row><Label>Last antihistamine (optional)</Label><Input type="datetime-local" value={last_antihistamine} onChange={(e) => setLastAnti(e.target.value)} /></Row>
+            <Row>
+              <Label>Medications & status (optional)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Pill active={taking_beta_blocker} onClick={() => setBB((v) => !v)}>Taking beta-blocker</Pill>
+                <Pill active={taking_ace_inhibitor} onClick={() => setACE((v) => !v)}>Taking ACE inhibitor</Pill>
+                <Pill active={pregnant} onClick={() => setPregnant((v) => !v)}>Pregnant</Pill>
+              </div>
+            </Row>
+            <Row>
+              <Label>Adrenaline auto-injector (optional)</Label>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Pill active={has_auto_injector} onClick={() => setHasAI((v) => !v)}>I have one</Pill>
+                <Pill active={carries_auto_injector} onClick={() => setCarriesAI((v) => !v)}>I carry it with me</Pill>
+              </div>
+            </Row>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={goPrev}>← Back</Btn>
+              <Btn onClick={goNext}>Next →</Btn>
+            </div>
+          </Page>
+        );
+
+      case 5:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
+            <p style={{ color: "#6b7280", marginTop: 0 }}>You can upload photos/letters now or skip this step.</p>
+            <Row>
+              <Label>Files</Label>
+              <input
+                type="file"
+                multiple
+                onChange={(e) => setFiles(Array.from(e.target.files || []))}
+                style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", background: "#fff" }}
+              />
+              {files?.length > 0 && <div style={{ fontSize: 12, color: "#6b7280" }}>{files.length} file(s) selected</div>}
+            </Row>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn onClick={() => { setFiles([]); setUploadSkipped(true); goNext(); }}>Skip upload</Btn>
+              <Btn onClick={goPrev}>← Back</Btn>
+              <Btn onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
+            </div>
+          </Page>
+        );
+
+      case 6:
+        return (
+          <Page>
+            <h2 style={{ marginTop: 0 }}>Review & submit</h2>
+            <Row><Label>Any final notes? (optional)</Label><Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} /></Row>
+            <Row>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
+                I confirm the above is accurate. *
+              </label>
+              {errors.confirm && <ErrorText>{errors.confirm}</ErrorText>}
+            </Row>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Btn onClick={goPrev}>← Back</Btn>
+              <Btn disabled={!canNext} onClick={handleSubmit}>{submitting ? "Submitting…" : "Submit form"}</Btn>
+            </div>
+          </Page>
+        );
+
+      default:
+        return null;
     }
   };
 
   return (
     <div style={{ maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
-      {/* progress */}
-      <div style={{ marginBottom: 12, color: "#6b7280" }}>
-        Step {step} of {totalSteps}
-      </div>
+      <div style={{ marginBottom: 12, color: "#6b7280" }}>Step {step} of {totalSteps}</div>
 
       {errMsg && (
         <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
@@ -243,237 +471,12 @@ export default function IntakeForm() {
         </div>
       )}
 
-      {/* ====== STEP 1: Patient identity ====== */}
-      {step === 1 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Patient details</h2>
-          <Row>
-            <Label>First name</Label>
-            <Input value={first_name} onChange={(e) => setFirstName(e.target.value)} />
-          </Row>
-          <Row>
-            <Label>Surname</Label>
-            <Input value={surname} onChange={(e) => setSurname(e.target.value)} />
-          </Row>
-          <Row>
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </Row>
-          <Row>
-            <Label>Phone</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </Row>
-          <Row>
-            <Label>Date of birth</Label>
-            <Input type="date" value={date_of_birth} onChange={(e) => setDOB(e.target.value)} />
-          </Row>
-          <Row>
-            <Label>NHS number (optional)</Label>
-            <Input value={nhs_number} onChange={(e) => setNhs(e.target.value)} />
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn disabled>← Back</Btn>
-            <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
-          </div>
-        </Page>
-      )}
-
-      {/* ====== STEP 2: Symptoms & history ====== */}
-      {step === 2 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Symptoms & reaction history</h2>
-
-          <Row>
-            <Label>Symptoms (select all that apply)</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {SYMPTOMS.map((s) => (
-                <Pill key={s} active={symptoms.includes(s)} onClick={() => toggleArrayVal(symptoms, setSymptoms, s)}>
-                  {s}
-                </Pill>
-              ))}
-            </div>
-          </Row>
-
-          <Row>
-            <Label>When did reactions start?</Label>
-            <Input value={onset_time} onChange={(e) => setOnsetTime(e.target.value)} placeholder="e.g. 6 months ago" />
-          </Row>
-
-          <Row>
-            <Label>How often do reactions occur?</Label>
-            <Input value={reaction_frequency} onChange={(e) => setReactionFrequency(e.target.value)} placeholder="e.g. monthly" />
-          </Row>
-
-          <Row>
-            <Label>Most severe reaction (brief description)</Label>
-            <Textarea value={most_severe_reaction} onChange={(e) => setMostSevere(e.target.value)} />
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn onClick={goPrev}>← Back</Btn>
-            <Btn onClick={goNext}>Next →</Btn>
-          </div>
-        </Page>
-      )}
-
-      {/* ====== STEP 3: Triggers & baked tolerance ====== */}
-      {step === 3 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Possible triggers</h2>
-
-          <Row>
-            <Label>Food triggers (select all that apply)</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {FOOD_TRIGGERS.map((t) => (
-                <Pill key={t} active={food_triggers.includes(t)} onClick={() => toggleArrayVal(food_triggers, setFoodTriggers, t)}>
-                  {t}
-                </Pill>
-              ))}
-            </div>
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-              Tip: choose <b>“unsure”</b> if you’re not certain yet.
-            </div>
-          </Row>
-
-          {food_triggers.includes("other") && (
-            <Row>
-              <Label>Other triggers</Label>
-              <Input value={other_triggers} onChange={(e) => setOtherTriggers(e.target.value)} placeholder="e.g. chickpea, lupin" />
-            </Row>
-          )}
-
-          <Row>
-            <Label>Baked tolerance (optional)</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Pill active={can_eat_baked_egg} onClick={() => setBakedEgg((v) => !v)}>Can eat baked egg</Pill>
-              <Pill active={can_eat_baked_milk} onClick={() => setBakedMilk((v) => !v)}>Can eat baked milk</Pill>
-            </div>
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn onClick={goPrev}>← Back</Btn>
-            <Btn onClick={goNext}>Next →</Btn>
-          </div>
-        </Page>
-      )}
-
-      {/* ====== STEP 4: Comorbidities & readiness ====== */}
-      {step === 4 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Health & medications</h2>
-
-          <Row>
-            <Label>Asthma control</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {["well-controlled", "sometimes-uncontrolled", "poorly-controlled", "none"].map((a) => (
-                <Pill key={a} active={asthma_control === a} onClick={() => setAsthma(a)}>{a}</Pill>
-              ))}
-            </div>
-          </Row>
-
-          <Row>
-            <Label>Other conditions</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Pill active={eczema} onClick={() => setEczema((v) => !v)}>Eczema</Pill>
-              <Pill active={hay_fever} onClick={() => setHayFever((v) => !v)}>Hay fever</Pill>
-            </div>
-            <Textarea value={other_conditions} onChange={(e) => setOtherConditions(e.target.value)} placeholder="Add any other relevant conditions" />
-          </Row>
-
-          <Row>
-            <Label>Last antihistamine taken (date & time)</Label>
-            <Input type="datetime-local" value={last_antihistamine} onChange={(e) => setLastAnti(e.target.value)} />
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-              (We usually need at least 72 hours without antihistamines before skin prick testing.)
-            </div>
-          </Row>
-
-          <Row>
-            <Label>Medications & status</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Pill active={taking_beta_blocker} onClick={() => setBB((v) => !v)}>Taking beta-blocker</Pill>
-              <Pill active={taking_ace_inhibitor} onClick={() => setACE((v) => !v)}>Taking ACE inhibitor</Pill>
-              <Pill active={pregnant} onClick={() => setPregnant((v) => !v)}>Pregnant</Pill>
-            </div>
-          </Row>
-
-          <Row>
-            <Label>Adrenaline auto-injector</Label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Pill active={has_auto_injector} onClick={() => setHasAI((v) => !v)}>I have one</Pill>
-              <Pill active={carries_auto_injector} onClick={() => setCarriesAI((v) => !v)}>I carry it with me</Pill>
-            </div>
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <Btn onClick={goPrev}>← Back</Btn>
-            <Btn onClick={goNext}>Next →</Btn>
-          </div>
-        </Page>
-      )}
-
-      {/* ====== STEP 5: Attachments (optional) ====== */}
-      {step === 5 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
-          <p style={{ color: "#6b7280", marginTop: 0 }}>
-            You can upload photos of rashes, previous letters, or test results. This step is optional — you can also <b>skip</b> it.
-          </p>
-
-          <Row>
-            <Label>Files</Label>
-            <input
-              type="file"
-              multiple
-              onChange={(e) => setFiles(Array.from(e.target.files || []))}
-              style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", background: "#fff" }}
-            />
-            {files?.length > 0 && (
-              <div style={{ fontSize: 12, color: "#6b7280" }}>{files.length} file(s) selected</div>
-            )}
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn onClick={() => { setFiles([]); setUploadSkipped(true); goNext(); }}>
-              Skip upload
-            </Btn>
-            <Btn onClick={goPrev}>← Back</Btn>
-            <Btn onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
-          </div>
-        </Page>
-      )}
-
-      {/* ====== STEP 6: Review & submit ====== */}
-      {step === 6 && (
-        <Page>
-          <h2 style={{ marginTop: 0 }}>Review & submit</h2>
-
-          <Row>
-            <Label>Any final notes for the clinic? (optional)</Label>
-            <Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} placeholder="Add anything else you want us to know" />
-          </Row>
-
-          <Row>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
-              I confirm the information above is accurate to the best of my knowledge.
-            </label>
-          </Row>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn onClick={goPrev}>← Back</Btn>
-            <Btn disabled={!confirm_submission || submitting} onClick={handleSubmit}>
-              {submitting ? "Submitting…" : "Submit form"}
-            </Btn>
-          </div>
-        </Page>
-      )}
+      {renderStep()}
     </div>
   );
 }
 
-// simple filename sanitiser
+/* ---------- helpers ---------- */
 function sanitizeName(name) {
   return name.replace(/[^\w.\-]+/g, "_");
 }
