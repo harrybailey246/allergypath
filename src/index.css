@@ -11,3 +11,51 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+/* === Theme variables === */
+:root {
+  --bg: #f9fafb;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --primary: #2563eb;
+  --border: #e5e7eb;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f172a;
+  --card: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --primary: #60a5fa;
+  --border: #1f2937;
+}
+
+body { background: var(--bg); color: var(--text); }
+
+/* Shimmer for skeletons */
+@keyframes ap-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+/* Make plain elements adopt theme colors automatically */
+input, textarea, select {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+input::placeholder, textarea::placeholder {
+  color: var(--muted);
+}
+button {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:hover { filter: brightness(0.98); }
+table { color: var(--text); background: var(--card); }
+th, td { border-bottom: 1px solid var(--border); }

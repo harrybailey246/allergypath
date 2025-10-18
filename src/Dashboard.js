@@ -194,7 +194,11 @@ export default function Dashboard({ onOpenAnalytics }) {
           >
             ↑ Top
           </button>
-          <button style={btn} onClick={onOpenAnalytics}>Admin Analytics</button>
+          {onOpenAnalytics && (
+            <button style={btn} onClick={onOpenAnalytics}>
+              Admin Analytics
+            </button>
+          )}
         </div>
       </div>
 
@@ -239,7 +243,24 @@ export default function Dashboard({ onOpenAnalytics }) {
       {/* Table */}
       <div style={card}>
         {loading ? (
-          <div>Loading…</div>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th>Submitted</th>
+                <th>Patient</th>
+                <th>Risk</th>
+                <th>SPT</th>
+                <th>Status</th>
+                <th>Assignee</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonRow key={i} />
+              ))}
+            </tbody>
+          </table>
         ) : filtered.length === 0 ? (
           <div style={{ color: "#6b7280" }}>No submissions.</div>
         ) : (
@@ -591,6 +612,32 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
   );
 }
 
+// Skeleton row for loading state
+function SkeletonRow() {
+  const shimmer = {
+    height: 10,
+    width: "100%",
+    borderRadius: 6,
+    background: "linear-gradient(90deg, #eceff3, #f5f7fa 40%, #eceff3 80%)",
+    backgroundSize: "200% 100%",
+    animation: "ap-shimmer 1.2s linear infinite",
+  };
+  return (
+    <tr>
+      <td><div style={{ ...shimmer, width: 140 }} /></td>
+      <td>
+        <div style={{ ...shimmer, width: 160, marginBottom: 6 }} />
+        <div style={{ ...shimmer, width: 140 }} />
+      </td>
+      <td><div style={{ ...shimmer, width: 70 }} /></td>
+      <td><div style={{ ...shimmer, width: 60 }} /></td>
+      <td><div style={{ ...shimmer, width: 100 }} /></td>
+      <td><div style={{ ...shimmer, width: 120 }} /></td>
+      <td><div style={{ ...shimmer, width: 240 }} /></td>
+    </tr>
+  );
+}
+
 // Tiny helper used above
 function Label({ children }) {
   return <div style={{ fontSize: 14, marginBottom: 6 }}>{children}</div>;
@@ -618,7 +665,7 @@ function StatusChip({ value }) {
 /* ---- styles ---- */
 const wrap = { maxWidth: 1000, margin: "24px auto", fontFamily: "system-ui, sans-serif" };
 const input = { padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" };
-const card = { border: "1px solid #eee", borderRadius: 10, padding: 12 };
+const card = { border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "var(--card)" };
 const table = { width: "100%", borderCollapse: "separate", borderSpacing: "0 8px" };
 const tabs = { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 };
 const tabBtn = { padding: "6px 10px", borderRadius: 999, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
