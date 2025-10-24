@@ -49,16 +49,35 @@ export default function PatientPortal() {
   // load appointments for each submission
   React.useEffect(() => {
     const loadAppts = async () => {
-      if (!user?.email || subs.length === 0) return;
-      const map = {};
-      for (const s of subs) {
-        const { data, error } = await supabase
-          .from("appointments")
-          .select("id, start_at, end_at, location, notes")
-          .eq("submission_id", s.id)
-          .order("start_at", { ascending: true });
-        map[s.id] = error ? [] : (data || []);
+      if (!user?.email || subs.length === 0) {
+        setAppts({});
+        return;
       }
+
+      const submissionIds = subs.map((s) => s.id);
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("id, submission_id, start_at, end_at, location, notes")
+        .in("submission_id", submissionIds)
+        .order("start_at", { ascending: true });
+
+      if (error) {
+        setAppts({});
+        return;
+      }
+
+      const map = submissionIds.reduce((acc, id) => {
+        acc[id] = [];
+        return acc;
+      }, {});
+
+      (data || []).forEach((appt) => {
+        if (!map[appt.submission_id]) {
+          map[appt.submission_id] = [];
+        }
+        map[appt.submission_id].push(appt);
+      });
+
       setAppts(map);
     };
     loadAppts();
