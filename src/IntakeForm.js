@@ -1,36 +1,37 @@
 // src/IntakeForm.js
 import React, { useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
+import { uploadAttachment } from "./storage";
+import "./IntakeForm.css";
 
 /* ---------- tiny UI bits ---------- */
-const Page = ({ children }) => (
-  <div style={{ background: "white", border: "1px solid #eee", borderRadius: 12, padding: 16, maxWidth: 760, margin: "0 auto" }}>
-    {children}
-  </div>
+const Page = ({ children }) => <section className="intake-card">{children}</section>;
+const Row = ({ children, className = "" }) => (
+  <div className={`intake-row ${className}`.trim()}>{children}</div>
 );
-const Row = ({ children }) => <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>{children}</div>;
-const Label = ({ children }) => <div style={{ fontWeight: 600, fontSize: 14 }}>{children}</div>;
-const Help = ({ children }) => <div style={{ fontSize: 12, color: "#6b7280" }}>{children}</div>;
-const ErrorText = ({ children }) => <div style={{ color: "#b91c1c", fontSize: 13 }}>{children}</div>;
-const Input = (props) => <input {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" }} />;
-const Textarea = (props) => <textarea {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", minHeight: 80 }} />;
-const Btn = ({ children, ...props }) => (
-  <button {...props} style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, background: "#fff", cursor: "pointer" }}>
+const Label = ({ children }) => <div className="intake-label">{children}</div>;
+const Help = ({ children }) => <div className="intake-help">{children}</div>;
+const ErrorText = ({ children }) => <div className="intake-error">{children}</div>;
+const Input = ({ className = "", ...props }) => (
+  <input {...props} className={`intake-input ${className}`.trim()} />
+);
+const Textarea = ({ className = "", ...props }) => (
+  <textarea {...props} className={`intake-textarea ${className}`.trim()} />
+);
+const Btn = ({ children, variant = "secondary", className = "", type = "button", ...props }) => (
+  <button
+    {...props}
+    type={type}
+    className={`intake-btn intake-btn--${variant} ${className}`.trim()}
+  >
     {children}
   </button>
 );
-const Pill = ({ active, onClick, children }) => (
+const Pill = ({ active, className = "", children, ...props }) => (
   <button
     type="button"
-    onClick={onClick}
-    style={{
-      padding: "6px 10px",
-      borderRadius: 999,
-      border: "1px solid #ddd",
-      cursor: "pointer",
-      background: active ? "#111827" : "#fff",
-      color: active ? "#fff" : "#111827",
-    }}
+    {...props}
+    className={`intake-pill ${active ? "is-active" : ""} ${className}`.trim()}
   >
     {children}
   </button>
@@ -151,10 +152,27 @@ export default function IntakeForm() {
   const canNext = useMemo(() => {
     if (step === 1) return first_name && surname && email && phone && date_of_birth;
     if (step === 2) return symptoms.length > 0 && most_severe_reaction.trim().length > 0;
-    if (step === 3) return food_triggers.length > 0 && (!food_triggers.includes("other") || other_triggers.trim().length > 0);
+    if (step === 3)
+      return (
+        food_triggers.length > 0 &&
+        (!food_triggers.includes("other") || other_triggers.trim().length > 0)
+      );
     if (step === 6) return confirm_submission && !submitting;
     return true;
-  }, [step, first_name, surname, email, phone, date_of_birth, symptoms, most_severe_reaction, food_triggers, other_triggers, confirm_submission, submitting]);
+  }, [
+    step,
+    first_name,
+    surname,
+    email,
+    phone,
+    date_of_birth,
+    symptoms,
+    most_severe_reaction,
+    food_triggers,
+    other_triggers,
+    confirm_submission,
+    submitting,
+  ]);
 
   const goNext = () => {
     if (validateStep(step)) setStep((s) => Math.min(totalSteps, s + 1));
@@ -175,6 +193,7 @@ export default function IntakeForm() {
         phone,
         date_of_birth, // keep as YYYY-MM-DD (backend can store as text/date)
         nhs_number: nhs_number || null,
+        attachments: [],
 
         symptoms,
         onset_time: onset_time || null,
@@ -218,14 +237,16 @@ export default function IntakeForm() {
       if (!uploadSkipped && files && files.length > 0) {
         for (const f of files) {
           if (!f || !f.name) continue;
-          const path = `${submissionId}/${Date.now()}_${sanitizeName(f.name)}`;
-          const { error: upErr } = await supabase.storage.from("attachments").upload(path, f);
-          if (!upErr) uploaded.push(path);
+          const path = await uploadAttachment(f, { folder: `submissions/${submissionId}` });
+          uploaded.push(path);
         }
       }
 
       if (uploaded.length) {
-        await supabase.from("submissions").update({ attachments: uploaded }).eq("id", submissionId);
+        await supabase
+          .from("submissions")
+          .update({ attachments: uploaded })
+          .eq("id", submissionId);
       }
 
       setOkMsg("Thanks — your form was submitted successfully.");
@@ -234,12 +255,31 @@ export default function IntakeForm() {
       setFiles([]);
       setUploadSkipped(false);
       setConfirmSubmission(false);
-      setFirstName(""); setSurname(""); setEmail(""); setPhone(""); setDOB(""); setNhs("");
-      setSymptoms([]); setOnsetTime(""); setReactionFrequency(""); setMostSevere("");
-      setFoodTriggers([]); setOtherTriggers(""); setBakedEgg(false); setBakedMilk(false);
-      setAsthma(""); setEczema(false); setHayFever(false); setOtherConditions("");
-      setLastAnti(""); setBB(false); setACE(false); setPregnant(false);
-      setHasAI(false); setCarriesAI(false); setTestNotes("");
+      setFirstName("");
+      setSurname("");
+      setEmail("");
+      setPhone("");
+      setDOB("");
+      setNhs("");
+      setSymptoms([]);
+      setOnsetTime("");
+      setReactionFrequency("");
+      setMostSevere("");
+      setFoodTriggers([]);
+      setOtherTriggers("");
+      setBakedEgg(false);
+      setBakedMilk(false);
+      setAsthma("");
+      setEczema(false);
+      setHayFever(false);
+      setOtherConditions("");
+      setLastAnti("");
+      setBB(false);
+      setACE(false);
+      setPregnant(false);
+      setHasAI(false);
+      setCarriesAI(false);
+      setTestNotes("");
       setErrors({});
     } catch (e) {
       console.error(e);
@@ -255,7 +295,7 @@ export default function IntakeForm() {
       case 1:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Patient details</h2>
+            <h2 className="intake-card__title">Patient details</h2>
 
             <Row>
               <Label>First name *</Label>
@@ -287,9 +327,11 @@ export default function IntakeForm() {
               <Input value={nhs_number} onChange={(e) => setNhs(e.target.value)} />
             </Row>
 
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="intake-actions">
               <Btn disabled>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>
+                Next →
+              </Btn>
             </div>
           </Page>
         );
@@ -297,10 +339,10 @@ export default function IntakeForm() {
       case 2:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Symptoms & reaction history</h2>
+            <h2 className="intake-card__title">Symptoms &amp; reaction history</h2>
             <Row>
               <Label>Symptoms * (select all that apply)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 {SYMPTOMS.map((s) => (
                   <Pill key={s} active={symptoms.includes(s)} onClick={() => toggleArrayVal(symptoms, setSymptoms, s)}>
                     {s}
@@ -311,20 +353,30 @@ export default function IntakeForm() {
             </Row>
             <Row>
               <Label>When did reactions start? (optional)</Label>
-              <Input value={onset_time} onChange={(e) => setOnsetTime(e.target.value)} placeholder="e.g. 6 months ago" />
+              <Input
+                value={onset_time}
+                onChange={(e) => setOnsetTime(e.target.value)}
+                placeholder="e.g. 6 months ago"
+              />
             </Row>
             <Row>
               <Label>How often do reactions occur? (optional)</Label>
-              <Input value={reaction_frequency} onChange={(e) => setReactionFrequency(e.target.value)} placeholder="e.g. monthly" />
+              <Input
+                value={reaction_frequency}
+                onChange={(e) => setReactionFrequency(e.target.value)}
+                placeholder="e.g. monthly"
+              />
             </Row>
             <Row>
               <Label>Most severe reaction *</Label>
               <Textarea value={most_severe_reaction} onChange={(e) => setMostSevere(e.target.value)} />
               {errors.most_severe_reaction && <ErrorText>{errors.most_severe_reaction}</ErrorText>}
             </Row>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="intake-actions">
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>
+                Next →
+              </Btn>
             </div>
           </Page>
         );
@@ -332,36 +384,48 @@ export default function IntakeForm() {
       case 3:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Possible triggers</h2>
+            <h2 className="intake-card__title">Possible triggers</h2>
             <Row>
               <Label>Food triggers * (select all that apply)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 {FOOD_TRIGGERS.map((t) => (
-                  <Pill key={t} active={food_triggers.includes(t)} onClick={() => toggleArrayVal(food_triggers, setFoodTriggers, t)}>
+                  <Pill
+                    key={t}
+                    active={food_triggers.includes(t)}
+                    onClick={() => toggleArrayVal(food_triggers, setFoodTriggers, t)}
+                  >
                     {t}
                   </Pill>
                 ))}
               </div>
-              <Help>Choose <b>“unsure”</b> if you’re not certain.</Help>
+              <Help>
+                Choose <b>“unsure”</b> if you’re not certain.
+              </Help>
               {errors.food_triggers && <ErrorText>{errors.food_triggers}</ErrorText>}
             </Row>
             {food_triggers.includes("other") && (
               <Row>
                 <Label>Other triggers *</Label>
-                <Input value={other_triggers} onChange={(e) => setOtherTriggers(e.target.value)} placeholder="e.g. chickpea" />
+                <Input
+                  value={other_triggers}
+                  onChange={(e) => setOtherTriggers(e.target.value)}
+                  placeholder="e.g. chickpea"
+                />
                 {errors.other_triggers && <ErrorText>{errors.other_triggers}</ErrorText>}
               </Row>
             )}
             <Row>
               <Label>Baked tolerance (optional)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 <Pill active={can_eat_baked_egg} onClick={() => setBakedEgg((v) => !v)}>Can eat baked egg</Pill>
                 <Pill active={can_eat_baked_milk} onClick={() => setBakedMilk((v) => !v)}>Can eat baked milk</Pill>
               </div>
             </Row>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="intake-actions">
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>
+                Next →
+              </Btn>
             </div>
           </Page>
         );
@@ -369,27 +433,36 @@ export default function IntakeForm() {
       case 4:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Health & medications</h2>
+            <h2 className="intake-card__title">Health &amp; medications</h2>
             <Row>
               <Label>Asthma control (optional)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 {["well-controlled", "sometimes-uncontrolled", "poorly-controlled", "none"].map((a) => (
-                  <Pill key={a} active={asthma_control === a} onClick={() => setAsthma(a)}>{a}</Pill>
+                  <Pill key={a} active={asthma_control === a} onClick={() => setAsthma(a)}>
+                    {a}
+                  </Pill>
                 ))}
               </div>
             </Row>
             <Row>
               <Label>Other conditions (optional)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 <Pill active={eczema} onClick={() => setEczema((v) => !v)}>Eczema</Pill>
                 <Pill active={hay_fever} onClick={() => setHayFever((v) => !v)}>Hay fever</Pill>
               </div>
-              <Textarea value={other_conditions} onChange={(e) => setOtherConditions(e.target.value)} placeholder="Add any other relevant conditions" />
+              <Textarea
+                value={other_conditions}
+                onChange={(e) => setOtherConditions(e.target.value)}
+                placeholder="Add any other relevant conditions"
+              />
             </Row>
-            <Row><Label>Last antihistamine (optional)</Label><Input type="datetime-local" value={last_antihistamine} onChange={(e) => setLastAnti(e.target.value)} /></Row>
             <Row>
-              <Label>Medications & status (optional)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Label>Last antihistamine (optional)</Label>
+              <Input type="datetime-local" value={last_antihistamine} onChange={(e) => setLastAnti(e.target.value)} />
+            </Row>
+            <Row>
+              <Label>Medications &amp; status (optional)</Label>
+              <div className="intake-pill-group">
                 <Pill active={taking_beta_blocker} onClick={() => setBB((v) => !v)}>Taking beta-blocker</Pill>
                 <Pill active={taking_ace_inhibitor} onClick={() => setACE((v) => !v)}>Taking ACE inhibitor</Pill>
                 <Pill active={pregnant} onClick={() => setPregnant((v) => !v)}>Pregnant</Pill>
@@ -397,14 +470,16 @@ export default function IntakeForm() {
             </Row>
             <Row>
               <Label>Adrenaline auto-injector (optional)</Label>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div className="intake-pill-group">
                 <Pill active={has_auto_injector} onClick={() => setHasAI((v) => !v)}>I have one</Pill>
                 <Pill active={carries_auto_injector} onClick={() => setCarriesAI((v) => !v)}>I carry it with me</Pill>
               </div>
             </Row>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="intake-actions">
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" onClick={goNext}>
+                Next →
+              </Btn>
             </div>
           </Page>
         );
@@ -412,22 +487,38 @@ export default function IntakeForm() {
       case 5:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
-            <p style={{ color: "#6b7280", marginTop: 0 }}>You can upload photos/letters now or skip this step.</p>
+            <h2 className="intake-card__title">Upload documents (optional)</h2>
+            <p className="intake-subtitle">You can upload photos/letters now or skip this step.</p>
             <Row>
               <Label>Files</Label>
               <input
                 type="file"
                 multiple
                 onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", background: "#fff" }}
+                className="intake-file-input"
               />
-              {files?.length > 0 && <div style={{ fontSize: 12, color: "#6b7280" }}>{files.length} file(s) selected</div>}
+              {files?.length > 0 && <div className="intake-help">{files.length} file(s) selected</div>}
             </Row>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Btn onClick={() => { setFiles([]); setUploadSkipped(true); goNext(); }}>Skip upload</Btn>
+            <div className="intake-actions intake-actions--wrap">
+              <Btn
+                onClick={() => {
+                  setFiles([]);
+                  setUploadSkipped(true);
+                  goNext();
+                }}
+              >
+                Skip upload
+              </Btn>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
+              <Btn
+                variant="primary"
+                onClick={() => {
+                  setUploadSkipped(false);
+                  goNext();
+                }}
+              >
+                Next →
+              </Btn>
             </div>
           </Page>
         );
@@ -435,18 +526,27 @@ export default function IntakeForm() {
       case 6:
         return (
           <Page>
-            <h2 style={{ marginTop: 0 }}>Review & submit</h2>
-            <Row><Label>Any final notes? (optional)</Label><Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} /></Row>
+            <h2 className="intake-card__title">Review &amp; submit</h2>
             <Row>
-              <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
-                I confirm the above is accurate. *
+              <Label>Any final notes? (optional)</Label>
+              <Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} />
+            </Row>
+            <Row>
+              <label className="intake-checkbox">
+                <input
+                  type="checkbox"
+                  checked={confirm_submission}
+                  onChange={(e) => setConfirmSubmission(e.target.checked)}
+                />
+                <span>I confirm the above is accurate. *</span>
               </label>
               {errors.confirm && <ErrorText>{errors.confirm}</ErrorText>}
             </Row>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="intake-actions intake-actions--wrap">
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={handleSubmit}>{submitting ? "Submitting…" : "Submit form"}</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={handleSubmit}>
+                {submitting ? "Submitting…" : "Submit form"}
+              </Btn>
             </div>
           </Page>
         );
@@ -457,26 +557,23 @@ export default function IntakeForm() {
   };
 
   return (
-    <div style={{ maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ marginBottom: 12, color: "#6b7280" }}>Step {step} of {totalSteps}</div>
+    <div className="intake-shell">
+      <div className="intake-progress">Step {step} of {totalSteps}</div>
 
       {errMsg && (
-        <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
-          ❌ {errMsg}
+        <div className="intake-alert intake-alert--error">
+          <span aria-hidden="true">❌</span>
+          <span>{errMsg}</span>
         </div>
       )}
       {okMsg && (
-        <div style={{ background: "#dcfce7", border: "1px solid #bbf7d0", color: "#14532d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
-          ✅ {okMsg}
+        <div className="intake-alert intake-alert--success">
+          <span aria-hidden="true">✅</span>
+          <span>{okMsg}</span>
         </div>
       )}
 
       {renderStep()}
     </div>
   );
-}
-
-/* ---------- helpers ---------- */
-function sanitizeName(name) {
-  return name.replace(/[^\w.\-]+/g, "_");
 }
