@@ -6,6 +6,7 @@ import Dashboard from "./Dashboard";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
+import PartnerPortal from "./PartnerPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
 
@@ -149,7 +150,10 @@ export default function App() {
     switch (view) {
       case "dashboard":
         return authed ? (
-          <Dashboard onOpenAnalytics={() => window.setView("analytics")} />
+          <Dashboard
+            onOpenAnalytics={() => window.setView("analytics")}
+            onOpenPartnerPortal={() => window.setView("partner")}
+          />
         ) : (
           <Login />
         );
@@ -175,6 +179,15 @@ export default function App() {
           <ThemedPage title="Patient Portal">
             <PatientPortal />
           </ThemedPage>
+        );
+
+      case "partner":
+        return authed ? (
+          <ThemedPage title="Partner Portal">
+            <PartnerPortal />
+          </ThemedPage>
+        ) : (
+          <Login />
         );
 
       case "login":
@@ -327,6 +340,18 @@ function NavMenu({ authed, isAdmin, current }) {
         >
           Dashboard
         </MenuItem>
+
+        {authed && (
+          <MenuItem
+            active={current === "partner"}
+            onClick={() => {
+              window.setView("partner");
+              setOpen(false);
+            }}
+          >
+            Partner Portal
+          </MenuItem>
+        )}
 
         {authed && isAdmin && (
           <MenuItem

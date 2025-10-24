@@ -15,7 +15,7 @@ const STATUS_TABS = [
 
 const PAGE_SIZE = 50;
 
-export default function Dashboard({ onOpenAnalytics }) {
+export default function Dashboard({ onOpenAnalytics, onOpenPartnerPortal }) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [notes, setNotes] = useState("");
@@ -194,6 +194,11 @@ export default function Dashboard({ onOpenAnalytics }) {
           >
             ↑ Top
           </button>
+          {onOpenPartnerPortal && (
+            <button style={btn} onClick={onOpenPartnerPortal}>
+              Partner Portal
+            </button>
+          )}
           {onOpenAnalytics && (
             <button style={btn} onClick={onOpenAnalytics}>
               Admin Analytics
