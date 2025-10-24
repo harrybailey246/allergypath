@@ -12,6 +12,8 @@ const initialForm = {
 };
 
 const SLOT_SOURCES = getSlotSources();
+const PROCESS_BOOKING_ENDPOINT =
+  process.env.REACT_APP_BOOKING_HANDLER_URL || "/functions/v1/process-booking";
 
 export default function BookAndPay() {
   const [slots, setSlots] = React.useState([]);
@@ -22,7 +24,14 @@ export default function BookAndPay() {
   const [submitting, setSubmitting] = React.useState(false);
   const [success, setSuccess] = React.useState("");
   const [paymentNotice, setPaymentNotice] = React.useState("");
+  const [paymentStatus, setPaymentStatus] = React.useState(null);
+  const [confirmation, setConfirmation] = React.useState(null);
   const [slotSource, setSlotSource] = React.useState(null);
+  const confirmationDate = React.useMemo(() => {
+    if (!confirmation?.slot?.start_at) return null;
+    const date = new Date(confirmation.slot.start_at);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }, [confirmation]);
 
   const loadSlots = React.useCallback(async () => {
     setLoading(true);
@@ -96,6 +105,8 @@ export default function BookAndPay() {
     setError("");
     setSuccess("");
     setPaymentNotice("");
+    setPaymentStatus(null);
+    setConfirmation(null);
 
     if (!selected) {
       setError("Choose an appointment slot to continue.");
@@ -115,46 +126,90 @@ export default function BookAndPay() {
 
     setSubmitting(true);
     try {
-      const payload = {
-        slot_id: selected.id,
-        first_name: form.first_name.trim(),
-        surname: form.surname.trim() || null,
-        email: form.email.trim(),
-        phone: form.phone.trim(),
-        notes: form.notes.trim() || null,
-      };
-
-      const { error: insertError } = await supabase.from("booking_requests").insert([payload]);
-      if (insertError) throw insertError;
-
-      // mark slot as tentatively reserved so it disappears from the picker
-      if (!slotSource) {
+      const source = selected.source || slotSource;
+      if (!source) {
         throw new Error(
           "No appointment slot source is configured. Refresh the page and try again."
         );
       }
 
-      const slotClient = slotSource.schema ? supabase.schema(slotSource.schema) : supabase;
-      await slotClient
-        .from(slotSource.table)
-        .update({ is_booked: true })
-        .eq("id", selected.id)
-        .eq("is_booked", false);
+      const requestPayload = {
+        slot_id: selected.id,
+        slot_table: source.table,
+        slot_schema: source.schema,
+        patient: {
+          first_name: form.first_name.trim(),
+          surname: form.surname.trim() || null,
+          email: form.email.trim(),
+          phone: form.phone.trim(),
+        },
+        notes: form.notes.trim() || null,
+        slot_details: {
+          id: selected.id,
+          start_at: selected.start_at,
+          duration_mins: selected.duration_mins,
+          location: selected.location,
+          price_cents: selected.price_cents,
+          price: selected.price,
+          currency: selected.currency,
+          payment_link: selected.payment_link,
+        },
+        metadata: {
+          source: "public-portal",
+        },
+      };
 
-      setSuccess("Great! We’ve reserved this appointment — complete payment below to confirm.");
-      setPaymentNotice(
-        selected.payment_link
-          ? "Payment opens in a new tab."
-          : "A team member will contact you to take payment."
-      );
+      const response = await fetch(PROCESS_BOOKING_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestPayload),
+      });
 
-      if (selected.payment_link && typeof window !== 'undefined') {
-        window.open(selected.payment_link, "_blank", "noopener,noreferrer");
+      let result = null;
+      try {
+        result = await response.json();
+      } catch (parseError) {
+        console.error("Failed to parse booking response", parseError);
       }
 
-      setForm(initialForm);
-      setSelected(null);
-      await loadSlots();
+      if (!result) {
+        throw new Error("Unexpected response from the booking service.");
+      }
+
+      setPaymentStatus(result.payment || null);
+
+      if (result.payment?.status === "pending") {
+        setPaymentNotice(
+          result.message ||
+            "Your payment is pending — complete the payment in the newly opened window."
+        );
+        if (result.payment.checkout_url && typeof window !== "undefined") {
+          window.open(result.payment.checkout_url, "_blank", "noopener,noreferrer");
+        }
+      }
+
+      if (result.payment?.status === "failed" || response.status === 402) {
+        setError(result.message || "Payment failed. Please try another method.");
+        return;
+      }
+
+      if (result.success) {
+        setSuccess(result.message || "Payment complete – you’re booked in!");
+        setConfirmation(result.confirmation || null);
+        setPaymentNotice(
+          result.payment?.receipt_url
+            ? "Your receipt is available using the link below."
+            : ""
+        );
+        setForm(initialForm);
+        setSelected(null);
+        await loadSlots();
+        return;
+      }
+
+      if (!result.success && result.payment?.status !== "pending") {
+        setError(result.message || "We couldn’t complete your booking. Please try again.");
+      }
     } catch (e) {
       console.error(e);
       setError(formatFriendlyError(e));
@@ -211,6 +266,54 @@ export default function BookAndPay() {
       {paymentNotice && (
         <div style={{ ...alert, background: "rgba(59, 130, 246, 0.08)", border: "1px solid rgba(37, 99, 235, 0.25)" }}>
           ℹ️ {paymentNotice}
+        </div>
+      )}
+
+      {confirmation && (
+        <div style={{ ...alert, background: "rgba(22, 163, 74, 0.1)", border: "1px solid rgba(22, 163, 74, 0.3)" }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+            Appointment details
+          </div>
+          <ul style={confirmationList}>
+            {confirmationDate && (
+              <li style={confirmationItem}>
+                <strong>Date</strong>
+                <span>{format(confirmationDate, "EEEE d MMMM yyyy, HH:mm")}</span>
+              </li>
+            )}
+            {confirmation.slot?.location && (
+              <li style={confirmationItem}>
+                <strong>Location</strong>
+                <span>{confirmation.slot.location}</span>
+              </li>
+            )}
+            {paymentStatus?.reference && (
+              <li style={confirmationItem}>
+                <strong>Payment reference</strong>
+                <span>{paymentStatus.reference}</span>
+              </li>
+            )}
+          </ul>
+          {paymentStatus?.receipt_url && (
+            <a
+              href={paymentStatus.receipt_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={confirmationLink}
+            >
+              View receipt
+            </a>
+          )}
+        </div>
+      )}
+
+      {paymentStatus?.status === "pending" && paymentStatus.checkout_url && (
+        <div style={{ ...alert, background: "rgba(250, 204, 21, 0.1)", border: "1px solid rgba(234, 179, 8, 0.4)", color: "var(--text)" }}>
+          🔔 Payment still pending –{' '}
+          <a href={paymentStatus.checkout_url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--primary)", fontWeight: 600 }}>
+            open the secure checkout
+          </a>{' '}
+          to complete your booking.
         </div>
       )}
 
@@ -476,6 +579,12 @@ function formatFriendlyError(error) {
   if (/booking_requests/i.test(msg) && /does not exist/i.test(msg)) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
   }
+  if (/booking service/i.test(msg) && /response/i.test(msg)) {
+    return "We couldn’t confirm the booking because the server returned an unexpected response. Please try again.";
+  }
+  if (/fetch failed/i.test(msg) || /failed to fetch/i.test(msg)) {
+    return "We couldn’t reach the booking service. Check your internet connection and try again.";
+  }
   return msg;
 }
 
@@ -526,13 +635,17 @@ async function fetchSlotsForSource(client, source, nowIso) {
       fallback.error.__slotSource = source;
       throw fallback.error;
     }
-    return fallback.data || [];
+    return attachSourceMetadata(fallback.data || [], source);
   }
   if (error) {
     error.__slotSource = source;
     throw error;
   }
-  return data || [];
+  return attachSourceMetadata(data || [], source);
+}
+
+function attachSourceMetadata(records, source) {
+  return (records || []).map((record) => ({ ...record, __slot_source: source }));
 }
 
 function normaliseSlotRecords(records) {
@@ -584,6 +697,7 @@ function normaliseSlotRecords(records) {
       deposit,
       payment_link: record.payment_link || record.payment_url || record.checkout_url || null,
       is_booked: isBooked,
+      source: record.__slot_source || null,
     };
   });
 }
@@ -689,6 +803,28 @@ const alert = {
   padding: "12px 16px",
   color: "var(--text)",
   fontSize: 14,
+};
+
+const confirmationList = {
+  listStyle: "none",
+  margin: "0 0 8px",
+  padding: 0,
+  display: "grid",
+  gap: 4,
+};
+
+const confirmationItem = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  fontSize: 13,
+  color: "var(--text)",
+};
+
+const confirmationLink = {
+  color: "var(--primary)",
+  fontWeight: 600,
+  textDecoration: "none",
 };
 
 const grid = {
