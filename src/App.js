@@ -6,6 +6,7 @@ import Dashboard from "./Dashboard";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
+import PartnerPortal from "./PartnerPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
 
@@ -87,6 +88,7 @@ export default function App() {
     (typeof window !== "undefined" && window.location.hash.replace("#", "")) || "intake"
   );
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isPartner, setIsPartner] = useState(false);
   const [theme, setTheme] = useState("light");
 
   // Theme: load & apply on boot
@@ -131,13 +133,21 @@ export default function App() {
   useEffect(() => {
     const getRole = async () => {
       setIsAdmin(false);
+      setIsPartner(false);
       if (!user?.email) return;
       const { data, error } = await supabase
         .from("clinician_emails")
         .select("role")
         .eq("email", (user.email || "").toLowerCase())
         .maybeSingle();
-      if (!error && data?.role === "admin") setIsAdmin(true);
+      if (!error) {
+        if (data?.role === "admin") {
+          setIsAdmin(true);
+          setIsPartner(true);
+        } else if (data?.role === "partner") {
+          setIsPartner(true);
+        }
+      }
     };
     getRole();
   }, [user?.email]);
@@ -175,6 +185,17 @@ export default function App() {
           <ThemedPage title="Patient Portal">
             <PatientPortal />
           </ThemedPage>
+        );
+
+      case "partnerPortal":
+        return authed && isPartner ? (
+          <ThemedPage title="Partner Portal">
+            <PartnerPortal />
+          </ThemedPage>
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
         );
 
       case "login":
@@ -232,13 +253,13 @@ export default function App() {
           {authed && (
             <span style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
               Signed in as <b>{user.email}</b>
-              {isAdmin ? " • Admin" : ""}
+              {isAdmin ? " • Admin" : isPartner ? " • Partner" : ""}
             </span>
           )}
         </div>
 
         {/* Dropdown Navigation */}
-        <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+        <NavMenu authed={authed} isAdmin={isAdmin} isPartner={isPartner} current={view} />
       </header>
 
       {/* Main content */}
@@ -248,7 +269,7 @@ export default function App() {
 }
 
 /* ------------ Dropdown Menu ------------ */
-function NavMenu({ authed, isAdmin, current }) {
+function NavMenu({ authed, isAdmin, isPartner, current }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
 
@@ -317,6 +338,18 @@ function NavMenu({ authed, isAdmin, current }) {
         >
           Patient Portal
         </MenuItem>
+
+        {authed && (isPartner || isAdmin) && (
+          <MenuItem
+            active={current === "partnerPortal"}
+            onClick={() => {
+              window.setView("partnerPortal");
+              setOpen(false);
+            }}
+          >
+            Partner Portal
+          </MenuItem>
+        )}
 
         <MenuItem
           active={current === "dashboard"}
