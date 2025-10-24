@@ -8,6 +8,7 @@ import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
+import PartnerPortal from "./PartnerPortal";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -149,7 +150,10 @@ export default function App() {
     switch (view) {
       case "dashboard":
         return authed ? (
-          <Dashboard onOpenAnalytics={() => window.setView("analytics")} />
+          <Dashboard
+            onOpenAnalytics={() => window.setView("analytics")}
+            onOpenPartner={() => window.setView("partner")}
+          />
         ) : (
           <Login />
         );
@@ -175,6 +179,15 @@ export default function App() {
           <ThemedPage title="Patient Portal">
             <PatientPortal />
           </ThemedPage>
+        );
+
+      case "partner":
+        return authed ? (
+          <ThemedPage title="Partner Tools">
+            <PartnerPortal />
+          </ThemedPage>
+        ) : (
+          <Login />
         );
 
       case "login":
@@ -328,6 +341,18 @@ function NavMenu({ authed, isAdmin, current }) {
           Dashboard
         </MenuItem>
 
+        {authed && (
+          <MenuItem
+            active={current === "partner"}
+            onClick={() => {
+              window.setView("partner");
+              setOpen(false);
+            }}
+          >
+            Partner Tools
+          </MenuItem>
+        )}
+
         {authed && isAdmin && (
           <MenuItem
             active={current === "analytics"}
@@ -477,4 +502,3 @@ function NoAccess({ onBack }) {
     </div>
   );
 }
-
