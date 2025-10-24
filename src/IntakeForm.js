@@ -257,7 +257,8 @@ export default function IntakeForm() {
       // 1) create record first
       const { data: created, error: insErr } = await supabase
         .from("submissions")
-        .insert([payload])
+        // keep db defaults (e.g. status/flags) so server-side triggers don't break
+        .insert(payload, { defaultToNull: false })
         .select("id")
         .single();
 
@@ -276,7 +277,11 @@ export default function IntakeForm() {
       }
 
       if (uploaded.length) {
-        await supabase.from("submissions").update({ attachments: uploaded }).eq("id", submissionId);
+        const { error: updateErr } = await supabase
+          .from("submissions")
+          .update({ attachments: uploaded })
+          .eq("id", submissionId);
+        if (updateErr) throw updateErr;
       }
 
       setOkMsg("Thanks — your form was submitted successfully.");
