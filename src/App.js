@@ -15,6 +15,36 @@ window.setView = (view) => {
   if (typeof window !== "undefined") window.location.hash = "#" + view;
 };
 
+export function parseLocationView() {
+  if (typeof window === "undefined") {
+    return { view: "intake", params: new URLSearchParams() };
+  }
+
+  const { hash, search } = window.location;
+  const combinedParams = new URLSearchParams(search || "");
+
+  let view = "intake";
+
+  if (hash) {
+    const trimmed = hash.replace(/^#/, "");
+    const [hashView, hashQuery] = trimmed.split("?");
+    if (hashView) view = hashView;
+    if (hashQuery) {
+      const hashParams = new URLSearchParams(hashQuery);
+      hashParams.forEach((value, key) => {
+        combinedParams.set(key, value);
+      });
+    }
+  }
+
+  if (!hash || hash.replace(/^#/, "").length === 0) {
+    const queryView = combinedParams.get("view");
+    if (queryView) view = queryView;
+  }
+
+  return { view, params: combinedParams };
+}
+
 /* -------- theming helpers (CSS variables) -------- */
 const LIGHT = {
   "--bg": "#f5f7fb",
@@ -84,9 +114,9 @@ function applyTheme(name) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setLocalView] = useState(
-    (typeof window !== "undefined" && window.location.hash.replace("#", "")) || "intake"
-  );
+  const [route, setRoute] = useState(() => parseLocationView());
+  const view = route.view;
+  const params = route.params;
   const [isAdmin, setIsAdmin] = useState(false);
   const [theme, setTheme] = useState("light");
 
@@ -110,10 +140,13 @@ export default function App() {
 
   // Update view when hash changes
   useEffect(() => {
-    const handleHashChange = () =>
-      setLocalView(window.location.hash.replace("#", "") || "intake");
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    const refreshRoute = () => setRoute(parseLocationView());
+    window.addEventListener("hashchange", refreshRoute);
+    window.addEventListener("popstate", refreshRoute);
+    return () => {
+      window.removeEventListener("hashchange", refreshRoute);
+      window.removeEventListener("popstate", refreshRoute);
+    };
   }, []);
 
   // Load user and listen for changes
@@ -153,6 +186,14 @@ export default function App() {
           <Dashboard
             onOpenAnalytics={() => window.setView("analytics")}
             onOpenPartner={() => window.setView("partner")}
+            openSubmissionId={params.get("open")}
+            onClearOpenParam={() => {
+              if (typeof window === "undefined") return;
+              const url = new URL(window.location.href);
+              url.searchParams.delete("open");
+              window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+              setRoute(parseLocationView());
+            }}
           />
         ) : (
           <Login />

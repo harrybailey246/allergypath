@@ -10,7 +10,11 @@ export default function Login() {
   const sendLink = async (e) => {
     e.preventDefault();
     setError("");
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin + "/?view=dashboard" }});
+    const redirectTo = `${window.location.origin}/#dashboard`;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: redirectTo },
+    });
     if (error) setError(error.message);
     else setSent(true);
   };

@@ -15,7 +15,12 @@ const STATUS_TABS = [
 
 const PAGE_SIZE = 50;
 
-export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
+export default function Dashboard({
+  onOpenAnalytics,
+  onOpenPartner,
+  openSubmissionId,
+  onClearOpenParam,
+}) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [notes, setNotes] = useState("");
@@ -97,10 +102,19 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
     });
   }, [rows, q]);
 
-  const openDetail = (row) => {
+  const openDetail = useCallback((row) => {
     setSelected(row);
     setNotes(row.clinician_notes || "");
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!openSubmissionId) return;
+    const match = rows.find((row) => String(row.id) === String(openSubmissionId));
+    if (match) {
+      openDetail(match);
+      onClearOpenParam?.();
+    }
+  }, [openSubmissionId, rows, onClearOpenParam, openDetail]);
 
   const updateStatus = async (id, next) => {
     const { error } = await supabase
