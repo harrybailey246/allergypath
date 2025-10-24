@@ -1,70 +1,53 @@
-# Getting Started with Create React App
+# AllergyPath Frontend
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This React application connects to Supabase for authentication, storage, and real-time updates. The app expects the Supabase URL
+and anonymous key to be present at build time.
 
-## Available Scripts
+## Environment configuration
 
-In the project directory, you can run:
+1. Copy the provided `.env` file and populate the placeholders with your Supabase project details for local development.
+2. Do the same for `.env.production` when building locally for production.
+3. Never commit real credentials—use the hosting provider's environment variable manager in production.
 
-### `npm start`
+### Required variables
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+| Variable | Description |
+| --- | --- |
+| `REACT_APP_SUPABASE_URL` | The Supabase project URL (e.g., `https://xyzcompany.supabase.co`). |
+| `REACT_APP_SUPABASE_ANON_KEY` | The Supabase anonymous API key from **Project Settings → API**. |
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+If either variable is missing, the app will stop during initialization with a helpful error message so the problem can be fixed
+before deployment.
 
-### `npm test`
+### Hosting provider guidance
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+#### Netlify
+- **UI:** Site settings → Build & deploy → Environment → Edit variables. Add both variables and trigger a new deploy.
+- **CLI:** `netlify env:set REACT_APP_SUPABASE_URL <value>` and `netlify env:set REACT_APP_SUPABASE_ANON_KEY <value>`.
+  Deployments automatically pick up the values on the next build.
 
-### `npm run build`
+#### Vercel
+- **UI:** Project → Settings → Environment Variables. Add the two variables for the `Production`, `Preview`, and `Development` targets as needed.
+- **CLI:** `vercel env add REACT_APP_SUPABASE_URL production` (repeat for each environment and variable).
+  Trigger a redeploy to rebuild with the new values.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+#### Supabase (Edge Functions/Hosting)
+- **Dashboard:** Project Settings → Configuration → Environment Variables. Add the variables so that Supabase-hosted Edge Functions
+  or SSR sites have access to them at build time.
+- **CLI:** `supabase secrets set REACT_APP_SUPABASE_URL='<value>' REACT_APP_SUPABASE_ANON_KEY='<value>'` before running `supabase deploy`.
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## Local development
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+```bash
+npm install
+npm start
+```
 
-### `npm run eject`
+## Production build
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+```bash
+npm run build
+```
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Ensure the production environment variables are populated before running the build so the generated assets have the correct Supabase
+configuration baked in.
