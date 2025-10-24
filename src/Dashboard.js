@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { format } from "date-fns";
 import { createEvent } from "ics";
 import { supabase } from "./supabaseClient";
+import { logAuditEvent } from "./auditLogs";
 
 const STATUS_TABS = [
   { key: "all", label: "All" },
@@ -102,13 +103,24 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
     setNotes(row.clinician_notes || "");
   };
 
-  const updateStatus = async (id, next) => {
+  const updateStatus = async (row, next) => {
     const { error } = await supabase
       .from("submissions")
       .update({ status: next, updated_at: new Date().toISOString() })
-      .eq("id", id);
+      .eq("id", row.id);
     if (error) alert("Failed to update: " + error.message);
-    else fetchRows();
+    else {
+      await logAuditEvent({
+        submissionId: row.id,
+        action: "status_changed",
+        payload: {
+          from: row.status,
+          to: next,
+          surface: "dashboard_list",
+        },
+      });
+      fetchRows();
+    }
   };
 
   const assignToMe = async (row) => {
@@ -122,7 +134,17 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
       })
       .eq("id", row.id);
     if (error) alert("Assign failed: " + error.message);
-    else fetchRows();
+    else {
+      await logAuditEvent({
+        submissionId: row.id,
+        action: "assigned_to_clinician",
+        payload: {
+          clinician_id: me.id,
+          clinician_email: me.email || null,
+        },
+      });
+      fetchRows();
+    }
   };
 
   const unassign = async (row) => {
@@ -135,7 +157,17 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
       })
       .eq("id", row.id);
     if (error) alert("Unassign failed: " + error.message);
-    else fetchRows();
+    else {
+      await logAuditEvent({
+        submissionId: row.id,
+        action: "clinician_unassigned",
+        payload: {
+          previous_clinician_id: row.clinician_id,
+          previous_clinician_email: row.clinician_email,
+        },
+      });
+      fetchRows();
+    }
   };
 
   const exportCSV = () => {
@@ -306,9 +338,9 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
                   </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button style={btn} onClick={() => updateStatus(row.id, "ready_spt")}>Mark Ready</button>
-                      <button style={btn} onClick={() => updateStatus(row.id, "needs_review")}>Needs Review</button>
-                      <button style={btn} onClick={() => updateStatus(row.id, "completed")}>Complete</button>
+                      <button style={btn} onClick={() => updateStatus(row, "ready_spt")}>Mark Ready</button>
+                      <button style={btn} onClick={() => updateStatus(row, "needs_review")}>Needs Review</button>
+                      <button style={btn} onClick={() => updateStatus(row, "completed")}>Complete</button>
                       {row.clinician_id ? (
                         <button style={btn} onClick={() => unassign(row)}>Unassign</button>
                       ) : (
@@ -342,6 +374,37 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
 
 /* ---- Detail Panel ---- */
 function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
+  const [auditLogs, setAuditLogs] = React.useState([]);
+  const [auditLoading, setAuditLoading] = React.useState(false);
+
+  const fetchAuditLogs = useCallback(async () => {
+    setAuditLoading(true);
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("id, action, payload, occurred_at, actor_id")
+      .eq("submission_id", row.id)
+      .order("occurred_at", { ascending: true });
+    if (error) {
+      console.error("Failed to load audit logs", error);
+    } else {
+      setAuditLogs(data || []);
+    }
+    setAuditLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchAuditLogs();
+    const ch = supabase
+      .channel(`audit_logs-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "audit_logs", filter: `submission_id=eq.${row.id}` },
+        fetchAuditLogs
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchAuditLogs, row.id]);
+
   // notes & status
   const saveNotes = async () => {
     const { error } = await supabase
@@ -351,8 +414,20 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
-    if (error) alert("Failed to save: " + error.message);
-    else onUpdate();
+    if (error) {
+      alert("Failed to save: " + error.message);
+      return;
+    }
+
+    await logAuditEvent({
+      submissionId: row.id,
+      action: "notes_updated",
+      payload: {
+        characters: notes.length,
+      },
+    });
+    await fetchAuditLogs();
+    onUpdate();
   };
 
   const updateStatus = async (next) => {
@@ -363,8 +438,22 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
-    if (error) alert("Update failed: " + error.message);
-    else onUpdate();
+    if (error) {
+      alert("Update failed: " + error.message);
+      return;
+    }
+
+    await logAuditEvent({
+      submissionId: row.id,
+      action: "status_changed",
+      payload: {
+        from: row.status,
+        to: next,
+        surface: "detail_panel",
+      },
+    });
+    await fetchAuditLogs();
+    onUpdate();
   };
 
   // scheduling state + loaders
@@ -537,6 +626,33 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
         <button onClick={() => updateStatus("completed")} style={btn}>Complete</button>
       </div>
 
+      {/* Audit timeline */}
+      <h4 style={{ marginTop: 16 }}>Audit timeline</h4>
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
+        {auditLoading ? (
+          <div style={{ color: "#6b7280" }}>Loading history…</div>
+        ) : auditLogs.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No activity recorded yet.</div>
+        ) : (
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 8 }}>
+            {auditLogs.map((log, index) => (
+              <li
+                key={log.id}
+                style={{
+                  padding: "6px 0",
+                  borderBottom: index === auditLogs.length - 1 ? "none" : "1px solid #f3f4f6",
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>{describeAuditAction(log)}</div>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {new Date(log.occurred_at).toLocaleString("en-GB")} • {auditActorLabel(log)}
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+
       {/* Scheduling */}
       <h4 style={{ marginTop: 16 }}>Schedule appointment</h4>
       <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
@@ -665,6 +781,34 @@ function StatusChip({ value }) {
   };
   const m = map[value] || map.new;
   return <Badge color={m.bg}>{m.label}</Badge>;
+}
+
+function describeAuditAction(log) {
+  const payload = log && typeof log.payload === "object" && log.payload !== null ? log.payload : {};
+  switch (log.action) {
+    case "status_changed":
+      return `Status changed from ${payload.from || "unknown"} to ${payload.to || "unknown"}`;
+    case "assigned_to_clinician":
+      return `Assigned to ${payload.clinician_email || payload.clinician_id || "clinician"}`;
+    case "clinician_unassigned":
+      return "Clinician unassigned";
+    case "notes_updated": {
+      const suffix = typeof payload.characters === "number" ? ` (${payload.characters} chars)` : "";
+      return `Clinical notes updated${suffix}`;
+    }
+    default:
+      return log.action.replace(/_/g, " ");
+  }
+}
+
+function auditActorLabel(log) {
+  const payload = log && typeof log.payload === "object" && log.payload !== null ? log.payload : {};
+  return (
+    payload.actor_email ||
+    payload.clinician_email ||
+    payload.assigned_to ||
+    (log.actor_id ? `User ${log.actor_id}` : "System")
+  );
 }
 
 /* ---- styles ---- */

@@ -1,70 +1,55 @@
-# Getting Started with Create React App
+# AllergyPath clinician tooling
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+This workspace contains the clinician dashboard and supporting Supabase functions used by the AllergyPath operations team.
 
-## Available Scripts
+## Local development
 
-In the project directory, you can run:
+1. Install dependencies with `npm install`.
+2. Start the client with `npm start` to serve the dashboard on http://localhost:3000.
+3. Provide the Supabase project URL and anon key via `src/supabaseClient.js` (already populated for the shared sandbox).
 
-### `npm start`
+## Governance & audit logging
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+To strengthen clinical governance we now capture a full audit trail for every mutation that touches a patient submission.
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+### Data model
 
-### `npm test`
+The migration in [`supabase/migrations/20240701000000_create_audit_logs.sql`](supabase/migrations/20240701000000_create_audit_logs.sql) provisions a dedicated `audit_logs` table with the columns `submission_id`, `actor_id`, `action`, `payload` (JSONB metadata), and `occurred_at`. The table is indexed by `(submission_id, occurred_at)` for efficient timeline retrieval.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+### Edge function
 
-### `npm run build`
+An Edge Function named `append-audit-log` (see [`src/Functions/append-audit-log/index.ts`](src/Functions/append-audit-log/index.ts)) accepts POST requests from the web app and inserts immutable audit rows using the Supabase service role. Deploy it with:
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```bash
+supabase functions deploy append-audit-log --no-verify-jwt
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Ensure the `SUPABASE_SERVICE_ROLE_KEY` secret is configured for the function so that inserts bypass row level security.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Application instrumentation
 
-### `npm run eject`
+Every clinician-facing write helper inside [`src/Dashboard.js`](src/Dashboard.js) now calls `logAuditEvent` from [`src/auditLogs.js`](src/auditLogs.js) after completing the primary Supabase mutation. The following actions are recorded automatically:
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+- Status changes triggered from the list view.
+- Assigning a submission to the active clinician.
+- Unassigning a submission.
+- Updating clinical notes in the detail panel.
+- Status changes triggered inside the detail panel.
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+The detail panel also shows a read-only "Audit timeline" section that queries the audit history for the open submission so clinicians can review who made each change and when.
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Access control & RLS
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+Row Level Security is enabled on `audit_logs`. Policies restrict access so that:
 
-## Learn More
+- Only the Supabase service role (used by Edge functions) can insert audit rows.
+- Authenticated clinicians can read logs for submissions assigned to them.
+- Administrators (identified by `app_metadata.role` of `admin` or `clinician_admin`) can review every audit record and delete entries during governance investigations if required.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Review and adjust the role checks to align with the production auth metadata before running the migration in production.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## Deploying updates
 
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+1. Run the SQL migration against the Supabase project (via the CLI or Studio).
+2. Deploy the `append-audit-log` Edge function.
+3. Redeploy the React application so the new instrumentation and timeline UI are available.
