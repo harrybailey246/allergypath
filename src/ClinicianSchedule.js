@@ -45,7 +45,7 @@ export default function ClinicianSchedule({ onBack }) {
         </div>
       </div>
 
-      <div style={{ color: "#6b7280", marginBottom: 8 }}>
+      <div style={{ color: "var(--muted)", marginBottom: 8 }}>
         {format(days[0], "EEE d MMM")} – {format(days[6], "EEE d MMM yyyy")}
       </div>
 
@@ -60,7 +60,7 @@ export default function ClinicianSchedule({ onBack }) {
               </div>
               <div style={{ display: "grid", gap: 6 }}>
                 {appts.filter(a => isSameDay(new Date(a.start_at), d)).length === 0 && (
-                  <div style={{ color: "#9ca3af", fontSize: 12 }}>No appointments</div>
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>No appointments</div>
                 )}
                 {appts
                   .filter(a => isSameDay(new Date(a.start_at), d))
@@ -74,8 +74,8 @@ export default function ClinicianSchedule({ onBack }) {
                       <div style={{ fontWeight: 600 }}>
                         {format(new Date(a.start_at), "HH:mm")} – {format(new Date(a.end_at), "HH:mm")}
                       </div>
-                      {a.location && <div style={{ color: "#6b7280" }}>📍 {a.location}</div>}
-                      {a.notes && <div style={{ color: "#6b7280", fontSize: 12 }}>🗒 {a.notes}</div>}
+                      {a.location && <div style={{ color: "var(--muted)" }}>📍 {a.location}</div>}
+                      {a.notes && <div style={{ color: "var(--muted)", fontSize: 12 }}>🗒 {a.notes}</div>}
                     </div>
                   ))}
               </div>
@@ -88,8 +88,8 @@ export default function ClinicianSchedule({ onBack }) {
 }
 
 /* styles */
-const wrap = { maxWidth: 1100, margin: "24px auto", fontFamily: "system-ui, sans-serif" };
+const wrap = { maxWidth: 1100, margin: "24px auto", fontFamily: "system-ui, sans-serif", display: "grid", gap: 20 };
 const grid7 = { display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 12 };
-const col = { border: "1px solid #eee", borderRadius: 10, padding: 10, background: "#fff" };
-const apptCard = { border: "1px solid #ddd", borderRadius: 8, padding: 8, cursor: "pointer", background: "#f9fafb" };
-const btn = { padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const col = { border: "1px solid var(--border)", borderRadius: 14, padding: 12, background: "var(--card)", display: "grid", gap: 8, boxShadow: "var(--shadow)" };
+const apptCard = { border: "1px solid var(--border)", borderRadius: 10, padding: 10, cursor: "pointer", background: "var(--card)", transition: "transform 0.18s ease, box-shadow 0.18s ease" };
+const btn = { padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--btnBg)", color: "var(--text)", cursor: "pointer", transition: "transform 0.18s ease, box-shadow 0.18s ease" };
