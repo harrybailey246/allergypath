@@ -12,6 +12,14 @@ const initialForm = {
 };
 
 const SLOT_SOURCES = getSlotSources();
+const SUPPORTED_FIRST_NAME_COLUMNS = [
+  "first_name",
+  "given_name",
+  "firstName",
+  "name",
+  "full_name",
+  "contact_name",
+];
 
 export default function BookAndPay() {
   const [slots, setSlots] = React.useState([]);
@@ -115,17 +123,16 @@ export default function BookAndPay() {
 
     setSubmitting(true);
     try {
+      const firstName = form.first_name.trim();
       const payload = {
         slot_id: selected.id,
-        first_name: form.first_name.trim(),
         surname: form.surname.trim() || null,
         email: form.email.trim(),
         phone: form.phone.trim(),
         notes: form.notes.trim() || null,
       };
 
-      const { error: insertError } = await supabase.from("booking_requests").insert([payload]);
-      if (insertError) throw insertError;
+      await insertBookingRequest(payload, firstName);
 
       // mark slot as tentatively reserved so it disappears from the picker
       if (!slotSource) {
@@ -465,6 +472,29 @@ function normaliseMoney(primary, fallback) {
   return null;
 }
 
+async function insertBookingRequest(basePayload, firstName) {
+  let lastColumnError = null;
+
+  for (const column of SUPPORTED_FIRST_NAME_COLUMNS) {
+    const record = { ...basePayload, [column]: firstName };
+    if (column !== "first_name") {
+      delete record.first_name;
+    }
+
+    const { error } = await supabase.from("booking_requests").insert([record]);
+    if (!error) return column;
+
+    if (!isMissingColumnError(error, column)) {
+      throw error;
+    }
+
+    lastColumnError = error;
+  }
+
+  if (lastColumnError) throw lastColumnError;
+  throw new Error("Unable to create booking request.");
+}
+
 function formatFriendlyError(error) {
   const msg = error?.message || "Something went wrong.";
   if (/schema cache/i.test(msg) && /appointment_slots/i.test(msg)) {
@@ -472,6 +502,9 @@ function formatFriendlyError(error) {
   }
   if (/appointment_slots/i.test(msg) && /does not exist/i.test(msg)) {
     return "The appointment slot source is missing. Confirm the Supabase table or view name configured for appointments.";
+  }
+  if (/booking_requests/i.test(msg) && /first_name/i.test(msg) && /does not exist/i.test(msg)) {
+    return "The booking_requests table is missing a supported first name column. Add first_name or one of given_name, firstName, name, full_name, contact_name.";
   }
   if (/booking_requests/i.test(msg) && /does not exist/i.test(msg)) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
