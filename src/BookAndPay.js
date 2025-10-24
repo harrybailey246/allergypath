@@ -124,8 +124,7 @@ export default function BookAndPay() {
         notes: form.notes.trim() || null,
       };
 
-      const { error: insertError } = await supabase.from("booking_requests").insert([payload]);
-      if (insertError) throw insertError;
+      await insertBookingRequest(payload);
 
       // mark slot as tentatively reserved so it disappears from the picker
       if (!slotSource) {
@@ -465,6 +464,98 @@ function normaliseMoney(primary, fallback) {
   return null;
 }
 
+async function insertBookingRequest(payload) {
+  const variants = buildBookingRequestPayloadVariants(payload);
+  let lastMissingColumnError = null;
+
+  for (const variant of variants) {
+    const { error } = await supabase.from("booking_requests").insert([variant.payload]);
+    if (!error) return;
+
+    const missingNameColumn = variant.columns.some(
+      (column) => column && isMissingColumnError(error, column)
+    );
+    if (missingNameColumn) {
+      lastMissingColumnError = error;
+      continue;
+    }
+
+    if (isMissingColumnError(error, "first_name")) {
+      lastMissingColumnError = error;
+      continue;
+    }
+
+    throw error;
+  }
+
+  if (lastMissingColumnError) {
+    throw lastMissingColumnError;
+  }
+
+  throw new Error(
+    "The booking request could not be saved because no compatible name columns were found in Supabase."
+  );
+}
+
+function buildBookingRequestPayloadVariants(payload) {
+  const base = {
+    slot_id: payload.slot_id,
+    email: payload.email,
+    phone: payload.phone,
+    notes: payload.notes,
+  };
+
+  const firstName = typeof payload.first_name === "string" ? payload.first_name : "";
+  const surname = payload.surname ?? null;
+  const fullName = [firstName, typeof surname === "string" ? surname : ""]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  const candidateVariants = [
+    {
+      columns: ["first_name", "surname"],
+      payload: { ...base, first_name: firstName, surname },
+    },
+    {
+      columns: ["first_name", "last_name"],
+      payload: { ...base, first_name: firstName, last_name: surname },
+    },
+    {
+      columns: ["given_name", "family_name"],
+      payload: { ...base, given_name: firstName, family_name: surname },
+    },
+    {
+      columns: ["firstName", "lastName"],
+      payload: { ...base, firstName, lastName: surname },
+    },
+    {
+      columns: ["first", "last"],
+      payload: { ...base, first: firstName, last: surname },
+    },
+    {
+      columns: ["name"],
+      payload: { ...base, name: fullName || firstName },
+    },
+    {
+      columns: ["full_name"],
+      payload: { ...base, full_name: fullName || firstName },
+    },
+    {
+      columns: ["contact_name"],
+      payload: { ...base, contact_name: fullName || firstName },
+    },
+  ];
+
+  const seen = new Set();
+  return candidateVariants.filter((variant) => {
+    const key = variant.columns.filter(Boolean).join("|") || "__none__";
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function formatFriendlyError(error) {
   const msg = error?.message || "Something went wrong.";
   if (/schema cache/i.test(msg) && /appointment_slots/i.test(msg)) {
@@ -475,6 +566,9 @@ function formatFriendlyError(error) {
   }
   if (/booking_requests/i.test(msg) && /does not exist/i.test(msg)) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
+  }
+  if (/schema cache/i.test(msg) && /booking_requests/i.test(msg) && /first_name/i.test(msg)) {
+    return "The booking_requests table is missing the first_name column. Update the Supabase table or rename the column to one of the supported alternatives (given_name, firstName, name, full_name, contact_name).";
   }
   return msg;
 }
