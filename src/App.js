@@ -8,6 +8,7 @@ import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
+import ClinicianLaunchpad from "./ClinicianLaunchpad";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -163,6 +164,19 @@ export default function App() {
           <Login />
         );
 
+      case "launchpad":
+        return authed ? (
+          <ThemedPage title="Clinician Launchpad">
+            <ClinicianLaunchpad
+              isAdmin={isAdmin}
+              onOpenDashboard={() => window.setView("dashboard")}
+              onOpenAnalytics={() => window.setView("analytics")}
+            />
+          </ThemedPage>
+        ) : (
+          <Login />
+        );
+
       case "book":
         return (
           <ThemedPage title="Book & Pay">
@@ -297,6 +311,18 @@ function NavMenu({ authed, isAdmin, current }) {
         >
           Patient Form
         </MenuItem>
+
+        {authed && (
+          <MenuItem
+            active={current === "launchpad"}
+            onClick={() => {
+              window.setView("launchpad");
+              setOpen(false);
+            }}
+          >
+            Clinician Launchpad
+          </MenuItem>
+        )}
 
         <MenuItem
           active={current === "book"}
