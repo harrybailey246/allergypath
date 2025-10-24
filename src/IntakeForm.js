@@ -1,6 +1,7 @@
 // src/IntakeForm.js
 import React, { useMemo, useState } from "react";
 import { supabase } from "./supabaseClient";
+import { uploadAttachment } from "./storage";
 
 /* ---------- tiny UI bits ---------- */
 const Page = ({ children }) => (
@@ -215,20 +216,41 @@ export default function IntakeForm() {
 
       // 2) optional upload (avoid “record 'pick' is not assigned yet” by ensuring target id exists first)
       const uploaded = [];
+      let uploadErr = null;
       if (!uploadSkipped && files && files.length > 0) {
         for (const f of files) {
           if (!f || !f.name) continue;
-          const path = `${submissionId}/${Date.now()}_${sanitizeName(f.name)}`;
-          const { error: upErr } = await supabase.storage.from("attachments").upload(path, f);
-          if (!upErr) uploaded.push(path);
+          try {
+            const path = await uploadAttachment(f, { folder: `submissions/${submissionId}` });
+            uploaded.push(path);
+          } catch (err) {
+            console.error("Attachment upload failed", err);
+            uploadErr = err;
+          }
         }
       }
 
       if (uploaded.length) {
-        await supabase.from("submissions").update({ attachments: uploaded }).eq("id", submissionId);
+        const { error: updateErr } = await supabase
+          .from("submissions")
+          .update({ attachments: uploaded })
+          .eq("id", submissionId);
+        if (updateErr) {
+          console.error("Failed to link attachments", updateErr);
+          uploadErr = uploadErr || updateErr;
+        }
       }
 
-      setOkMsg("Thanks — your form was submitted successfully.");
+      setOkMsg(
+        uploadErr
+          ? "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them."
+          : "Thanks — your form was submitted successfully."
+      );
+      setErrMsg(
+        uploadErr
+          ? "Your form went through, but some files failed to upload. Please email any important documents to the clinic."
+          : ""
+      );
       // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
@@ -474,9 +496,4 @@ export default function IntakeForm() {
       {renderStep()}
     </div>
   );
-}
-
-/* ---------- helpers ---------- */
-function sanitizeName(name) {
-  return name.replace(/[^\w.\-]+/g, "_");
 }

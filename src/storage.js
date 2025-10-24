@@ -3,13 +3,16 @@ import { supabase } from "./supabaseClient";
 
 /**
  * Upload a single File to the 'attachments' bucket.
+ * Optionally provide a { folder } to nest uploads, e.g. a submission id.
  * Returns the storage path (string) you can save in the DB.
  */
-export async function uploadAttachment(file) {
+export async function uploadAttachment(file, { folder } = {}) {
   // create a unique path to avoid collisions
   const ext = file.name.split(".").pop() || "bin";
   const safeBase = file.name.replace(/[^a-z0-9_\.\-]+/gi, "_").slice(0, 60);
-  const path = `uploads/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeBase}`;
+  const base = folder ? folder.replace(/^\/+|\/+$/g, "") : "uploads";
+  const prefix = base ? `${base}/` : "";
+  const path = `${prefix}${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeBase}`;
 
   const { error } = await supabase.storage
     .from("attachments")
