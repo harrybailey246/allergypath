@@ -18,15 +18,15 @@ export default function Wizard({ steps, onSubmit, validate }) {
   return (
     <div style={{ maxWidth: 720, margin: "0 auto" }}>
       {/* Progress */}
-      <div style={{ marginBottom: 12, color: "#6b7280" }}>
+      <div style={{ marginBottom: 12, color: "var(--muted)" }}>
         Step {i + 1} of {steps.length}: {steps[i].title}
       </div>
-      <div style={{ height: 8, background: "#eee", borderRadius: 999, marginBottom: 16 }}>
+      <div style={{ height: 8, background: "var(--border)", borderRadius: 999, marginBottom: 16 }}>
         <div
           style={{
             width: `${percent}%`,
             height: "100%",
-            background: "#111827",
+            background: "var(--primary)",
             borderRadius: 999,
             transition: "width .25s ease",
           }}
@@ -34,7 +34,7 @@ export default function Wizard({ steps, onSubmit, validate }) {
       </div>
 
       {/* Content */}
-      <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
+      <div style={{ border: "1px solid var(--border)", borderRadius: 12, padding: 16 }}>
         {steps[i].content}
       </div>
 
@@ -57,15 +57,15 @@ const btnPrimary = {
   padding: "10px 16px",
   borderRadius: 10,
   border: 0,
-  background: "#111827",
-  color: "#fff",
+  background: "var(--primary)",
+  color: "var(--primaryText)",
   cursor: "pointer",
 };
 const btnSecondary = {
   padding: "10px 16px",
   borderRadius: 10,
-  border: "1px solid #ddd",
-  background: "#fff",
-  color: "#111827",
+  border: "1px solid var(--border)",
+  background: "var(--card)",
+  color: "var(--text)",
   cursor: "pointer",
 };

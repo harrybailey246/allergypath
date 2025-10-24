@@ -116,7 +116,7 @@ export default function PatientPortal() {
       <div style={wrap}>
         <h1 style={{ marginTop: 0 }}>Patient Portal</h1>
         <Card>
-          <p style={{ color: "#6b7280" }}>
+          <p style={{ color: "var(--muted)" }}>
             Enter the email you used on the AllergyPath form and we’ll send you a one-time sign-in link.
           </p>
           <form onSubmit={sendMagicLink} style={{ display: "grid", gap: 8 }}>
@@ -131,7 +131,7 @@ export default function PatientPortal() {
             <button type="submit" style={btn} disabled={sent}>
               {sent ? "Link sent — check your inbox" : "Send magic link"}
             </button>
-            {err && <div style={{ color: "#b91c1c" }}>❌ {err}</div>}
+            {err && <div style={{ color: "var(--danger)" }}>❌ {err}</div>}
           </form>
         </Card>
       </div>
@@ -144,16 +144,16 @@ export default function PatientPortal() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h1 style={{ margin: 0 }}>My Allergy Submissions</h1>
         <div style={{ display: "flex", gap: 8 }}>
-          <span style={{ alignSelf: "center", color: "#6b7280", fontSize: 12 }}>{user.email}</span>
+          <span style={{ alignSelf: "center", color: "var(--muted)", fontSize: 12 }}>{user.email}</span>
           <button onClick={signOut} style={btn}>Sign out</button>
         </div>
       </div>
 
-      {err && <div style={{ color: "#b91c1c", margin: "8px 0" }}>❌ {err}</div>}
+      {err && <div style={{ color: "var(--danger)", margin: "8px 0" }}>❌ {err}</div>}
 
       {subs.length === 0 ? (
         <Card>
-          <div style={{ color: "#6b7280" }}>No submissions found for this email.</div>
+          <div style={{ color: "var(--muted)" }}>No submissions found for this email.</div>
         </Card>
       ) : (
         subs.map((s) => (
@@ -163,7 +163,7 @@ export default function PatientPortal() {
                 <div style={{ fontWeight: 600 }}>
                   {s.first_name} {s.surname}
                 </div>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
                   Submitted {new Date(s.created_at).toLocaleString("en-GB")}
                 </div>
               </div>
@@ -172,9 +172,9 @@ export default function PatientPortal() {
 
             <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
               <Row label="Skin-prick test readiness">
-                {s.spt_ready ? <Badge color="#059669">Ready</Badge> : <Badge color="#d97706">Hold</Badge>}
+                {s.spt_ready ? <Badge color="var(--success)">Ready</Badge> : <Badge color="var(--warning)">Hold</Badge>}
               </Row>
-              <Row label="Risk">{s.high_risk ? <Badge color="#b91c1c">High</Badge> : <Badge color="#059669">Normal</Badge>}</Row>
+              <Row label="Risk">{s.high_risk ? <Badge color="var(--danger)">High</Badge> : <Badge color="var(--success)">Normal</Badge>}</Row>
               <Row label="Symptoms">
                 {Array.isArray(s.symptoms) && s.symptoms.length ? s.symptoms.join(", ") : "—"}
               </Row>
@@ -200,17 +200,17 @@ export default function PatientPortal() {
                 {appts[s.id] && appts[s.id].length > 0 ? (
                   <div style={{ display: "grid", gap: 8 }}>
                     {appts[s.id].map((a) => (
-                      <div key={a.id} style={{ padding: 8, border: "1px solid #eee", borderRadius: 8 }}>
+                      <div key={a.id} style={{ padding: 8, border: "1px solid var(--border)", borderRadius: 8 }}>
                         <div style={{ fontWeight: 600 }}>
                           {fmt(new Date(a.start_at))} – {new Date(a.end_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                         </div>
-                        {a.location && <div style={{ color: "#6b7280" }}>📍 {a.location}</div>}
-                        {a.notes && <div style={{ color: "#6b7280" }}>🗒 {a.notes}</div>}
+                        {a.location && <div style={{ color: "var(--muted)" }}>📍 {a.location}</div>}
+                        {a.notes && <div style={{ color: "var(--muted)" }}>🗒 {a.notes}</div>}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={{ color: "#6b7280" }}>No appointments yet.</div>
+                  <div style={{ color: "var(--muted)" }}>No appointments yet.</div>
                 )}
               </div>
             </div>
@@ -225,7 +225,7 @@ export default function PatientPortal() {
 function Row({ label, children }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 8 }}>
-      <div style={{ color: "#6b7280" }}>{label}</div>
+      <div style={{ color: "var(--muted)" }}>{label}</div>
       <div>{children}</div>
     </div>
   );
@@ -246,7 +246,7 @@ function AttachmentRow({ path, getSignedUrl }) {
 
   const name = path.split("/").pop();
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid #eee", borderRadius: 8, padding: "6px 10px" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px" }}>
       <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
         📎 {name}
       </div>
@@ -274,10 +274,10 @@ function Badge({ children, color }) {
 }
 function StatusChip({ value }) {
   const map = {
-    new: { label: "New", bg: "#6b7280" },
-    ready_spt: { label: "Ready for SPT", bg: "#059669" },
-    needs_review: { label: "Needs Review", bg: "#d97706" },
-    completed: { label: "Completed", bg: "#2563eb" },
+    new: { label: "New", bg: "var(--muted)" },
+    ready_spt: { label: "Ready for SPT", bg: "var(--success)" },
+    needs_review: { label: "Needs Review", bg: "var(--warning)" },
+    completed: { label: "Completed", bg: "var(--primary)" },
   };
   const m = map[value] || map.new;
   return <Badge color={m.bg}>{m.label}</Badge>;
@@ -287,9 +287,9 @@ function fmt(d) {
 }
 
 /* ---- styles ---- */
-const wrap = { maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif" };
-const input = { padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" };
-const btn = { padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const wrap = { maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif", display: "grid", gap: 16 };
+const input = { padding: 12, border: "1px solid var(--border)", borderRadius: 12, width: "100%", background: "var(--card)", color: "var(--text)" };
+const btn = { padding: "8px 12px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--btnBg)", color: "var(--text)", cursor: "pointer", transition: "transform 0.18s ease, box-shadow 0.18s ease" };
 function Card({ children }) {
-  return <div style={{ border: "1px solid #eee", borderRadius: 10, padding: 12, background: "#fff", marginBottom: 12 }}>{children}</div>;
+  return <div style={{ border: "1px solid var(--border)", borderRadius: 16, padding: 16, background: "var(--card)", marginBottom: 16, boxShadow: "var(--shadow)" }}>{children}</div>;
 }

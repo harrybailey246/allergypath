@@ -15,7 +15,8 @@ export default function ThemedPage({ title, actions, children, maxWidth = 900 })
         color: "var(--text)",
         border: "1px solid var(--border)",
         borderRadius: 12,
-        padding: 16
+        padding: 16,
+        boxShadow: "var(--shadow)"
       }}>
         {children}
       </div>

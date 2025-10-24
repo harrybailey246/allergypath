@@ -4,18 +4,67 @@ import { supabase } from "./supabaseClient";
 
 /* ---------- tiny UI bits ---------- */
 const Page = ({ children }) => (
-  <div style={{ background: "white", border: "1px solid #eee", borderRadius: 12, padding: 16, maxWidth: 760, margin: "0 auto" }}>
+  <div
+    style={{
+      background: "var(--card)",
+      border: "1px solid var(--border)",
+      borderRadius: 16,
+      padding: 20,
+      maxWidth: 780,
+      margin: "0 auto",
+      boxShadow: "var(--shadow)",
+    }}
+  >
     {children}
   </div>
 );
 const Row = ({ children }) => <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>{children}</div>;
-const Label = ({ children }) => <div style={{ fontWeight: 600, fontSize: 14 }}>{children}</div>;
-const Help = ({ children }) => <div style={{ fontSize: 12, color: "#6b7280" }}>{children}</div>;
-const ErrorText = ({ children }) => <div style={{ color: "#b91c1c", fontSize: 13 }}>{children}</div>;
-const Input = (props) => <input {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%" }} />;
-const Textarea = (props) => <textarea {...props} style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", minHeight: 80 }} />;
-const Btn = ({ children, ...props }) => (
-  <button {...props} style={{ padding: "8px 12px", border: "1px solid #ddd", borderRadius: 8, background: "#fff", cursor: "pointer" }}>
+const Label = ({ children }) => <div style={{ fontWeight: 600, fontSize: 14, color: "var(--text)" }}>{children}</div>;
+const Help = ({ children }) => <div style={{ fontSize: 12, color: "var(--muted)" }}>{children}</div>;
+const ErrorText = ({ children }) => <div style={{ color: "var(--danger)", fontSize: 13 }}>{children}</div>;
+const Input = (props) => (
+  <input
+    {...props}
+    style={{
+      padding: 12,
+      border: "1px solid var(--border)",
+      borderRadius: 12,
+      width: "100%",
+      background: "var(--card)",
+      color: "var(--text)",
+    }}
+  />
+);
+const Textarea = (props) => (
+  <textarea
+    {...props}
+    style={{
+      padding: 12,
+      border: "1px solid var(--border)",
+      borderRadius: 12,
+      width: "100%",
+      minHeight: 90,
+      background: "var(--card)",
+      color: "var(--text)",
+    }}
+  />
+);
+const Btn = ({ children, variant = "default", style, ...props }) => (
+  <button
+    {...props}
+    style={{
+      padding: "10px 14px",
+      borderRadius: 12,
+      border: "1px solid var(--border)",
+      background: variant === "primary" ? "var(--primary)" : "var(--btnBg)",
+      color: variant === "primary" ? "var(--primaryText)" : "var(--text)",
+      cursor: props.disabled ? "not-allowed" : "pointer",
+      boxShadow: variant === "primary" ? "var(--shadow)" : "none",
+      fontWeight: variant === "primary" ? 600 : 500,
+      transition: "transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease",
+      ...style,
+    }}
+  >
     {children}
   </button>
 );
@@ -24,12 +73,14 @@ const Pill = ({ active, onClick, children }) => (
     type="button"
     onClick={onClick}
     style={{
-      padding: "6px 10px",
+      padding: "6px 12px",
       borderRadius: 999,
-      border: "1px solid #ddd",
+      border: active ? '1px solid var(--primary)' : '1px solid var(--border)',
       cursor: "pointer",
-      background: active ? "#111827" : "#fff",
-      color: active ? "#fff" : "#111827",
+      background: active ? "var(--pillActiveBg)" : "var(--pillBg)",
+      color: active ? "var(--pillActiveText)" : "var(--text)",
+      fontWeight: active ? 600 : 500,
+      transition: "all 0.18s ease",
     }}
   >
     {children}
@@ -289,7 +340,7 @@ export default function IntakeForm() {
 
             <div style={{ display: "flex", gap: 8 }}>
               <Btn disabled>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>Next →</Btn>
             </div>
           </Page>
         );
@@ -324,7 +375,7 @@ export default function IntakeForm() {
             </Row>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>Next →</Btn>
             </div>
           </Page>
         );
@@ -361,7 +412,7 @@ export default function IntakeForm() {
             </Row>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={goNext}>Next →</Btn>
             </div>
           </Page>
         );
@@ -404,7 +455,7 @@ export default function IntakeForm() {
             </Row>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn onClick={goNext}>Next →</Btn>
+              <Btn variant="primary" onClick={goNext}>Next →</Btn>
             </div>
           </Page>
         );
@@ -413,21 +464,21 @@ export default function IntakeForm() {
         return (
           <Page>
             <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
-            <p style={{ color: "#6b7280", marginTop: 0 }}>You can upload photos/letters now or skip this step.</p>
+            <p style={{ color: "var(--muted)", marginTop: 0 }}>You can upload photos/letters now or skip this step.</p>
             <Row>
               <Label>Files</Label>
               <input
                 type="file"
                 multiple
                 onChange={(e) => setFiles(Array.from(e.target.files || []))}
-                style={{ padding: 10, border: "1px solid #ddd", borderRadius: 10, width: "100%", background: "#fff" }}
+                style={{ padding: 10, border: "1px solid var(--border)", borderRadius: 10, width: "100%", background: "var(--card)" }}
               />
-              {files?.length > 0 && <div style={{ fontSize: 12, color: "#6b7280" }}>{files.length} file(s) selected</div>}
+              {files?.length > 0 && <div style={{ fontSize: 12, color: "var(--muted)" }}>{files.length} file(s) selected</div>}
             </Row>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <Btn onClick={() => { setFiles([]); setUploadSkipped(true); goNext(); }}>Skip upload</Btn>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
+              <Btn variant="primary" onClick={() => { setUploadSkipped(false); goNext(); }}>Next →</Btn>
             </div>
           </Page>
         );
@@ -446,7 +497,7 @@ export default function IntakeForm() {
             </Row>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <Btn onClick={goPrev}>← Back</Btn>
-              <Btn disabled={!canNext} onClick={handleSubmit}>{submitting ? "Submitting…" : "Submit form"}</Btn>
+              <Btn variant="primary" disabled={!canNext} onClick={handleSubmit}>{submitting ? "Submitting…" : "Submit form"}</Btn>
             </div>
           </Page>
         );
@@ -458,15 +509,15 @@ export default function IntakeForm() {
 
   return (
     <div style={{ maxWidth: 900, margin: "24px auto", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ marginBottom: 12, color: "#6b7280" }}>Step {step} of {totalSteps}</div>
+      <div style={{ marginBottom: 12, color: "var(--muted)" }}>Step {step} of {totalSteps}</div>
 
       {errMsg && (
-        <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#7f1d1d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+        <div style={{ background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "var(--danger)", padding: 10, borderRadius: 8, marginBottom: 10 }}>
           ❌ {errMsg}
         </div>
       )}
       {okMsg && (
-        <div style={{ background: "#dcfce7", border: "1px solid #bbf7d0", color: "#14532d", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+        <div style={{ background: "rgba(16, 185, 129, 0.12)", border: "1px solid rgba(16, 185, 129, 0.35)", color: "var(--success)", padding: 10, borderRadius: 8, marginBottom: 10 }}>
           ✅ {okMsg}
         </div>
       )}
