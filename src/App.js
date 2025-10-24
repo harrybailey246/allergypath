@@ -108,6 +108,25 @@ export default function App() {
     if (typeof window !== "undefined") window.localStorage.setItem("theme", next);
   };
 
+  // Normalize `?view=` query param into hash routing
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get("view");
+    if (!viewParam) return;
+    const normalized = viewParam.trim();
+    if (!normalized) return;
+
+    setLocalView(normalized);
+    window.setView(normalized);
+    params.delete("view");
+
+    const remaining = params.toString();
+    const nextUrl =
+      window.location.pathname + (remaining ? `?${remaining}` : "") + window.location.hash;
+    window.history.replaceState({}, "", nextUrl);
+  }, []);
+
   // Update view when hash changes
   useEffect(() => {
     const handleHashChange = () =>
