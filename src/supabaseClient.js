@@ -1,6 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = "https://kvyiuwbgxwhaaxbglxyz.supabase.co";
-const supabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2eWl1d2JneHdoYWF4YmdseHl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMjAzNzYsImV4cCI6MjA3NTU5NjM3Nn0.ktrdRtjMc82lbN-UBGknc1D_bHTKGVpoWGTh7VcSdAU";
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim();
+const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY?.trim();
+
+if (!supabaseUrl) {
+  throw new Error(
+    "Missing Supabase URL. Set the REACT_APP_SUPABASE_URL environment variable (e.g. in .env.local)."
+  );
+}
+
+if (!supabaseAnonKey) {
+  throw new Error(
+    "Missing Supabase anon key. Set the REACT_APP_SUPABASE_ANON_KEY environment variable (e.g. in .env.local)."
+  );
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

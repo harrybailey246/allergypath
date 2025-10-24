@@ -2,6 +2,20 @@
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Environment configuration
+
+This project requires Supabase credentials to run locally and in any deployed environment.
+
+1. Create a `.env.local` file (this file is already ignored by Git) in the project root if it does not exist.
+2. Add the following variables:
+
+   ```bash
+   REACT_APP_SUPABASE_URL="https://your-project-id.supabase.co"
+   REACT_APP_SUPABASE_ANON_KEY="your-anon-key"
+   ```
+
+For deployments, make sure the same variables are provided by your hosting provider so the application can reach Supabase.
+
 ## Available Scripts
 
 In the project directory, you can run:
