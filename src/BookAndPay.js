@@ -120,6 +120,23 @@ export default function BookAndPay() {
     }
   };
 
+  const handleDownloadICS = React.useCallback((slot) => {
+    if (!slot?.start_at) return;
+    const ics = buildICSFile(slot);
+    const blob = new Blob([ics], { type: "text/calendar" });
+    const url = URL.createObjectURL(blob);
+    const start = new Date(slot.start_at);
+    const filename = `appointment-${format(start, "yyyyMMdd-HHmm")}.ics`;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, []);
+
   return (
     <div style={container}>
       <style>{`
@@ -188,6 +205,13 @@ export default function BookAndPay() {
           <p style={{ color: "var(--muted)", marginTop: 0 }}>
             We’ll send confirmation and receipts to the email you provide.
           </p>
+          <BookingTable
+            slots={slots}
+            selectedId={selected?.id}
+            onSelect={setSelected}
+            onDownloadICS={handleDownloadICS}
+            loading={loading}
+          />
           <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
             <div style={fieldGroup}>
               <label style={label}>
@@ -281,6 +305,95 @@ function SlotCard({ slot, active, onSelect }) {
   );
 }
 
+function BookingTable({ slots, selectedId, onSelect, onDownloadICS, loading }) {
+  return (
+    <div style={tableWrapper}>
+      <div style={tableHeader}>
+        <h4 style={{ margin: 0, color: "var(--text)" }}>Clinic availability</h4>
+        <span style={tableCaption}>
+          Reminders are scheduled 24 hours and 1 hour before your visit.
+        </span>
+      </div>
+      {loading ? (
+        <div style={{ padding: "8px 0", color: "var(--muted)", fontSize: 13 }}>
+          Loading timetable…
+        </div>
+      ) : slots.length === 0 ? (
+        <div style={{ padding: "8px 0", color: "var(--muted)", fontSize: 13 }}>
+          New appointments will appear here as soon as they’re released.
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={tableStyle}>
+            <thead>
+              <tr>
+                <th scope="col" style={tableHeadCell}>
+                  Date
+                </th>
+                <th scope="col" style={tableHeadCell}>
+                  Time
+                </th>
+                <th scope="col" style={tableHeadCell}>
+                  Location
+                </th>
+                <th scope="col" style={tableHeadCell}>
+                  Price
+                </th>
+                <th scope="col" style={tableHeadCell}>
+                  Calendar
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {slots.map((slot) => {
+                const start = slot.start_at ? new Date(slot.start_at) : null;
+                const duration = slot.duration_mins || 60;
+                const end = start ? new Date(start.getTime() + duration * 60000) : null;
+                return (
+                  <tr
+                    key={slot.id}
+                    data-active={selectedId === slot.id ? "true" : undefined}
+                    style={selectedId === slot.id ? tableActiveRow : tableRow}
+                  >
+                    <td style={tableCell}>
+                      {start ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelect(slot)}
+                          style={{ ...tableSelectBtn, fontWeight: 600 }}
+                        >
+                          {format(start, "EEE d MMM")}
+                        </button>
+                      ) : (
+                        "TBC"
+                      )}
+                    </td>
+                    <td style={tableCell}>
+                      {start && end
+                        ? `${format(start, "HH:mm")} – ${format(end, "HH:mm")}`
+                        : "TBC"}
+                    </td>
+                    <td style={tableCell}>{slot.location || "Clinic"}</td>
+                    <td style={tableCell}>{formatPrice(slot) || "Contact us"}</td>
+                    <td style={{ ...tableCell, minWidth: 140 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <button type="button" style={tableDownloadBtn} onClick={() => onDownloadICS(slot)}>
+                          Add to calendar
+                        </button>
+                        <span style={tableReminder}>24h & 1h reminders</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatPrice(slot) {
   const amountCents = normaliseMoney(slot.price_cents, slot.price);
   if (amountCents == null) return null;
@@ -318,6 +431,60 @@ function formatFriendlyError(error) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
   }
   return msg;
+}
+
+function buildICSFile(slot) {
+  const start = slot.start_at ? new Date(slot.start_at) : null;
+  if (!start) return "";
+  const duration = slot.duration_mins || 60;
+  const end = new Date(start.getTime() + duration * 60000);
+  const dtStamp = formatICSDate(new Date());
+  const dtStart = formatICSDate(start);
+  const dtEnd = formatICSDate(end);
+  const uid = `appointment-${slot.id}@allergypath`;
+  const summary = escapeICSValue("Allergy Path clinic appointment");
+  const location = escapeICSValue(slot.location || "Clinic");
+  const description = escapeICSValue(
+    "We look forward to seeing you. Please contact the clinic if you need to reschedule."
+  );
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Allergy Path//Booking//EN",
+    "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${dtStamp}`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${summary}`,
+    `LOCATION:${location}`,
+    `DESCRIPTION:${description}`,
+    "BEGIN:VALARM",
+    "TRIGGER:-P1D",
+    "ACTION:DISPLAY",
+    "DESCRIPTION:Appointment reminder",
+    "END:VALARM",
+    "BEGIN:VALARM",
+    "TRIGGER:-PT1H",
+    "ACTION:DISPLAY",
+    "DESCRIPTION:Appointment reminder",
+    "END:VALARM",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ];
+
+  return lines.join("\r\n");
+}
+
+function formatICSDate(date) {
+  const iso = date.toISOString();
+  return iso.replace(/[-:]/g, "").split(".")[0] + "Z";
+}
+
+function escapeICSValue(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/;/g, "\\;").replace(/\n/g, "\\n");
 }
 
 /* styles */
@@ -365,6 +532,77 @@ const formPanel = {
   borderRadius: 16,
   padding: 20,
   boxShadow: "var(--shadow)",
+};
+
+const tableWrapper = {
+  display: "grid",
+  gap: 8,
+  marginBottom: 12,
+};
+
+const tableHeader = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+};
+
+const tableCaption = {
+  fontSize: 12,
+  color: "var(--muted)",
+};
+
+const tableStyle = {
+  width: "100%",
+  borderCollapse: "collapse",
+  fontSize: 13,
+};
+
+const tableHeadCell = {
+  textAlign: "left",
+  padding: "8px 6px",
+  color: "var(--muted)",
+  fontSize: 12,
+  letterSpacing: 0.3,
+  textTransform: "uppercase",
+  borderBottom: "1px solid var(--border)",
+};
+
+const tableRow = {
+  borderBottom: "1px solid var(--border)",
+};
+
+const tableActiveRow = {
+  ...tableRow,
+  background: "rgba(37, 99, 235, 0.08)",
+};
+
+const tableCell = {
+  padding: "10px 6px",
+  verticalAlign: "top",
+};
+
+const tableSelectBtn = {
+  background: "transparent",
+  border: "none",
+  color: "var(--primary)",
+  cursor: "pointer",
+  padding: 0,
+  fontSize: 13,
+};
+
+const tableDownloadBtn = {
+  background: "rgba(37, 99, 235, 0.1)",
+  border: "1px solid rgba(37, 99, 235, 0.3)",
+  borderRadius: 8,
+  color: "var(--primary)",
+  cursor: "pointer",
+  fontSize: 12,
+  padding: "6px 10px",
+};
+
+const tableReminder = {
+  fontSize: 11,
+  color: "var(--muted)",
 };
 
 const panelHeader = {
