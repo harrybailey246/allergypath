@@ -7,6 +7,7 @@ import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
 import ThemedPage from "./ThemedPage";
+import BookAndPay from "./BookAndPay";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -133,6 +134,13 @@ export default function App() {
           </ThemedPage>
         );
 
+      case "bookPay":
+        return (
+          <ThemedPage title="Book & Pay">
+            <BookAndPay />
+          </ThemedPage>
+        );
+
       case "login":
         return <Login />;
 
@@ -255,6 +263,16 @@ function NavMenu({ authed, isAdmin, current }) {
             }}
           >
             Patient Portal
+          </MenuItem>
+
+          <MenuItem
+            active={current === "bookPay"}
+            onClick={() => {
+              window.setView("bookPay");
+              setOpen(false);
+            }}
+          >
+            Book & Pay
           </MenuItem>
 
           {authed && isAdmin && (
