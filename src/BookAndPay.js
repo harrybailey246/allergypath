@@ -115,6 +115,12 @@ export default function BookAndPay() {
 
     setSubmitting(true);
     try {
+      if (!slotSource) {
+        throw new Error(
+          "No appointment slot source is configured. Refresh the page and try again."
+        );
+      }
+
       const payload = {
         slot_id: selected.id,
         first_name: form.first_name.trim(),
@@ -124,22 +130,27 @@ export default function BookAndPay() {
         notes: form.notes.trim() || null,
       };
 
-      const { error: insertError } = await supabase.from("booking_requests").insert([payload]);
-      if (insertError) throw insertError;
-
-      // mark slot as tentatively reserved so it disappears from the picker
-      if (!slotSource) {
-        throw new Error(
-          "No appointment slot source is configured. Refresh the page and try again."
-        );
-      }
-
       const slotClient = slotSource.schema ? supabase.schema(slotSource.schema) : supabase;
-      await slotClient
+      const {
+        data: updatedSlots,
+        error: updateError,
+        count,
+      } = await slotClient
         .from(slotSource.table)
         .update({ is_booked: true })
         .eq("id", selected.id)
-        .eq("is_booked", false);
+        .eq("is_booked", false)
+        .select("id", { count: "exact" });
+
+      if (updateError) throw updateError;
+
+      const affectedRows = typeof count === "number" ? count : updatedSlots?.length || 0;
+      if (affectedRows === 0) {
+        throw new Error("slot already booked");
+      }
+
+      const { error: insertError } = await supabase.from("booking_requests").insert([payload]);
+      if (insertError) throw insertError;
 
       setSuccess("Great! We’ve reserved this appointment — complete payment below to confirm.");
       setPaymentNotice(
@@ -475,6 +486,9 @@ function formatFriendlyError(error) {
   }
   if (/booking_requests/i.test(msg) && /does not exist/i.test(msg)) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
+  }
+  if (/slot already booked/i.test(msg)) {
+    return "That appointment slot has just been booked. Please choose another time.";
   }
   return msg;
 }
