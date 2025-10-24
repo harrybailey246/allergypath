@@ -11,6 +11,8 @@ const initialForm = {
   notes: "",
 };
 
+const SLOT_SOURCES = getSlotSources();
+
 export default function BookAndPay() {
   const [slots, setSlots] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -20,26 +22,56 @@ export default function BookAndPay() {
   const [submitting, setSubmitting] = React.useState(false);
   const [success, setSuccess] = React.useState("");
   const [paymentNotice, setPaymentNotice] = React.useState("");
+  const [slotSource, setSlotSource] = React.useState(null);
 
   const loadSlots = React.useCallback(async () => {
     setLoading(true);
     setError("");
+    setPaymentNotice("");
+    setSlotSource(null);
     try {
-      const { data, error: err } = await supabase
-        .from("appointment_slots")
-        .select(
-          "id, start_at, duration_mins, location, price_cents, price, currency, deposit_cents, payment_link, is_booked"
-        )
-        .gte("start_at", new Date().toISOString())
-        .order("start_at", { ascending: true });
+      const now = new Date();
+      const nowIso = now.toISOString();
+      let loaded = false;
+      let lastError = null;
 
-      if (err) throw err;
-      const available = (data || []).filter((slot) => !slot.is_booked);
-      setSlots(available);
-      if (available.length === 0) {
-        setPaymentNotice("All available appointments are currently booked. Please check back soon.");
-      } else {
-        setPaymentNotice("");
+      for (const source of SLOT_SOURCES) {
+        const client = source.schema ? supabase.schema(source.schema) : supabase;
+        try {
+          const records = await fetchSlotsForSource(client, source, nowIso);
+          const normalised = normaliseSlotRecords(records);
+          const upcoming = normalised.filter((slot) => {
+            if (!slot.start_at) return false;
+            const start = new Date(slot.start_at);
+            return !Number.isNaN(start.getTime()) && start >= now;
+          });
+          const available = upcoming.filter((slot) => !slot.is_booked);
+
+          setSlots(available);
+          setSlotSource(source);
+          setPaymentNotice(
+            available.length === 0
+              ? "All available appointments are currently booked. Please check back soon."
+              : ""
+          );
+
+          loaded = true;
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          if (isMissingSlotRelationError(err)) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (!loaded && lastError) {
+        throw lastError;
+      }
+      if (!loaded) {
+        throw new Error("No appointment slot source could be loaded.");
       }
     } catch (e) {
       console.error(e);
@@ -96,14 +128,25 @@ export default function BookAndPay() {
       if (insertError) throw insertError;
 
       // mark slot as tentatively reserved so it disappears from the picker
-      await supabase
-        .from("appointment_slots")
+      if (!slotSource) {
+        throw new Error(
+          "No appointment slot source is configured. Refresh the page and try again."
+        );
+      }
+
+      const slotClient = slotSource.schema ? supabase.schema(slotSource.schema) : supabase;
+      await slotClient
+        .from(slotSource.table)
         .update({ is_booked: true })
         .eq("id", selected.id)
         .eq("is_booked", false);
 
       setSuccess("Great! We’ve reserved this appointment — complete payment below to confirm.");
-      setPaymentNotice(selected.payment_link ? "Payment opens in a new tab." : "A team member will contact you to take payment.");
+      setPaymentNotice(
+        selected.payment_link
+          ? "Payment opens in a new tab."
+          : "A team member will contact you to take payment."
+      );
 
       if (selected.payment_link && typeof window !== 'undefined') {
         window.open(selected.payment_link, "_blank", "noopener,noreferrer");
@@ -424,13 +467,153 @@ function normaliseMoney(primary, fallback) {
 
 function formatFriendlyError(error) {
   const msg = error?.message || "Something went wrong.";
+  if (/schema cache/i.test(msg) && /appointment_slots/i.test(msg)) {
+    return "The appointment slot source could not be found. Update REACT_APP_APPOINTMENT_SLOT_SOURCES to point at the correct Supabase table or view.";
+  }
   if (/appointment_slots/i.test(msg) && /does not exist/i.test(msg)) {
-    return "The appointment_slots table is missing. Create it in Supabase with the columns used for slots.";
+    return "The appointment slot source is missing. Confirm the Supabase table or view name configured for appointments.";
   }
   if (/booking_requests/i.test(msg) && /does not exist/i.test(msg)) {
     return "The booking_requests table is missing. Create it in Supabase or grant insert permissions.";
   }
   return msg;
+}
+
+function getSlotSources() {
+  const configured = process.env.REACT_APP_APPOINTMENT_SLOT_SOURCES;
+  if (!configured) {
+    return [
+      { schema: null, table: "appointment_slots", filterColumn: "start_at" },
+      { schema: "bookings", table: "appointment_slots", filterColumn: "start_at" },
+      { schema: null, table: "available_appointment_slots", filterColumn: "start_at" },
+    ];
+  }
+
+  return configured
+    .split(",")
+    .map(parseSlotSource)
+    .filter(Boolean);
+}
+
+function parseSlotSource(entry) {
+  const raw = (entry || "").trim();
+  if (!raw) return null;
+
+  let schema = null;
+  let table = raw;
+
+  const separator = raw.includes(":") ? ":" : raw.includes(".") ? "." : null;
+  if (separator) {
+    const [schemaPart, tablePart] = raw.split(separator);
+    schema = schemaPart ? schemaPart.trim() || null : null;
+    table = (tablePart || "").trim();
+  }
+
+  if (!table) return null;
+
+  return { schema: schema || null, table, filterColumn: "start_at" };
+}
+
+async function fetchSlotsForSource(client, source, nowIso) {
+  let query = client.from(source.table).select("*");
+  if (source.filterColumn) {
+    query = query.gte(source.filterColumn, nowIso).order(source.filterColumn, { ascending: true });
+  }
+  const { data, error } = await query;
+  if (error && source.filterColumn && isMissingColumnError(error, source.filterColumn)) {
+    const fallback = await client.from(source.table).select("*");
+    if (fallback.error) {
+      fallback.error.__slotSource = source;
+      throw fallback.error;
+    }
+    return fallback.data || [];
+  }
+  if (error) {
+    error.__slotSource = source;
+    throw error;
+  }
+  return data || [];
+}
+
+function normaliseSlotRecords(records) {
+  return (records || []).map((record) => {
+    const startAt =
+      record.start_at ||
+      record.startAt ||
+      record.starts_at ||
+      record.start_time ||
+      record.start ||
+      null;
+    const duration =
+      coerceNumber(record.duration_mins) ??
+      coerceNumber(record.duration_minutes) ??
+      coerceNumber(record.duration) ??
+      coerceNumber(record.length_mins) ??
+      60;
+
+    const priceCents =
+      coerceNumber(record.price_cents) ??
+      coerceNumber(record.amount_cents) ??
+      coerceNumber(record.price_amount_cents) ??
+      null;
+    const price =
+      coerceNumber(record.price) ??
+      coerceNumber(record.price_amount) ??
+      coerceNumber(record.amount) ??
+      null;
+    const depositCents =
+      coerceNumber(record.deposit_cents) ??
+      coerceNumber(record.deposit_amount_cents) ??
+      null;
+    const deposit =
+      coerceNumber(record.deposit) ??
+      coerceNumber(record.deposit_amount) ??
+      null;
+
+    const isBooked = toBoolean(record.is_booked ?? record.booked ?? record.is_reserved ?? record.reserved ?? false);
+
+    return {
+      id: record.id ?? record.slot_id ?? record.uuid ?? record.slug ?? record.reference ?? startAt,
+      start_at: startAt,
+      duration_mins: duration,
+      location: record.location || record.venue || record.room || null,
+      price_cents: priceCents,
+      price,
+      currency: record.currency || record.currency_code || record.currency_iso || "GBP",
+      deposit_cents: depositCents,
+      deposit,
+      payment_link: record.payment_link || record.payment_url || record.checkout_url || null,
+      is_booked: isBooked,
+    };
+  });
+}
+
+function coerceNumber(value) {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function toBoolean(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalised = value.trim().toLowerCase();
+    return ["true", "t", "1", "yes", "y"].includes(normalised);
+  }
+  return Boolean(value);
+}
+
+function isMissingSlotRelationError(error) {
+  const msg = error?.message || "";
+  return /could not find table/i.test(msg) || /does not exist/i.test(msg);
+}
+
+function isMissingColumnError(error, column) {
+  if (!error?.message || !column) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("column") && message.includes(column.toLowerCase()) && message.includes("does not exist");
 }
 
 function buildICSFile(slot) {
