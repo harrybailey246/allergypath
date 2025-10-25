@@ -22,12 +22,56 @@ const SLOT_START_COLUMNS = [
   "start",
 ];
 const SLOT_LOCATION_COLUMNS = ["slot_location", "location", "clinic", "room"];
+const SLOT_DURATION_COLUMNS = [
+  "slot_duration_mins",
+  "duration_mins",
+  "duration_minutes",
+  "slot_duration",
+  "duration",
+];
+const SLOT_RESERVATION_COLUMNS = ["is_booked", "booked", "is_reserved", "reserved"];
+const SLOT_SOURCES = getSlotSources();
+const DEFAULT_APPOINTMENT_DURATION = 60;
+
+const TOAST_TONES = {
+  success: {
+    background: "rgba(22, 163, 74, 0.12)",
+    border: "1px solid rgba(22, 163, 74, 0.4)",
+  },
+  info: {
+    background: "rgba(37, 99, 235, 0.12)",
+    border: "1px solid rgba(37, 99, 235, 0.35)",
+  },
+  error: {
+    background: "rgba(239, 68, 68, 0.12)",
+    border: "1px solid rgba(239, 68, 68, 0.45)",
+  },
+};
 
 export default function BookingRequests() {
   const [loading, setLoading] = React.useState(true);
   const [requests, setRequests] = React.useState([]);
   const [error, setError] = React.useState("");
   const [busyId, setBusyId] = React.useState(null);
+  const [toast, setToast] = React.useState(null);
+  const toastTimeoutRef = React.useRef(null);
+
+  const showToast = React.useCallback((tone, message) => {
+    if (!message) return;
+    setToast({ tone, message });
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4500);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fetchRequests = React.useCallback(async () => {
     setLoading(true);
@@ -73,6 +117,18 @@ export default function BookingRequests() {
     setBusyId(request.raw.id);
     setError("");
     try {
+      const shouldCreateAppointment = ["approved", "converted"].includes(nextStatus);
+      let appointmentRecord = null;
+
+      if (shouldCreateAppointment) {
+        appointmentRecord = await createAppointmentForRequest(request);
+        const slotId =
+          appointmentRecord?.slot_id || request.raw.slot_id || request.raw.appointment_slot_id || request.raw.slot;
+        if (slotId) {
+          await reserveSlotById(slotId);
+        }
+      }
+
       const payload = buildUpdatePayload(request.raw, nextStatus);
       if (Object.keys(payload).length === 0) {
         throw new Error(
@@ -83,11 +139,40 @@ export default function BookingRequests() {
         .from("booking_requests")
         .update(payload)
         .eq("id", request.raw.id);
-      if (updateError) throw updateError;
+      if (updateError) {
+        if (appointmentRecord?.id) {
+          await rollbackAppointment(appointmentRecord.id);
+        }
+        throw updateError;
+      }
+      if (shouldCreateAppointment) {
+        await notifyRequestProcessed(request, nextStatus, appointmentRecord);
+      }
       setRequests((prev) => prev.filter((item) => item.raw.id !== request.raw.id));
+      const successName = request.displayName || "the patient";
+      if (nextStatus === "declined") {
+        showToast("info", `Declined the booking request for ${successName}.`);
+      } else if (nextStatus === "converted") {
+        showToast(
+          "success",
+          `Converted the booking request for ${successName}. Appointment confirmed for ${
+            formatAppointmentToastSummary(appointmentRecord) || "the selected slot"
+          }.`
+        );
+      } else if (nextStatus === "approved") {
+        showToast(
+          "success",
+          `Approved the booking request for ${successName}. Appointment scheduled for ${
+            formatAppointmentToastSummary(appointmentRecord) || "the selected slot"
+          }.`
+        );
+      }
     } catch (err) {
       console.error(err);
       setError(formatFriendlyError(err));
+      if (err?.message) {
+        showToast("error", err.message);
+      }
     } finally {
       setBusyId(null);
     }
@@ -98,7 +183,10 @@ export default function BookingRequests() {
       <header style={header}>
         <div>
           <h1 style={{ margin: 0 }}>Booking Requests</h1>
-          <p style={muted}>Review and process self-service appointment requests.</p>
+          <p style={muted}>
+            Review, approve, or decline self-service appointment requests. Approvals automatically
+            reserve the slot and create the appointment for you.
+          </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={button} onClick={fetchRequests} disabled={loading}>
@@ -106,6 +194,10 @@ export default function BookingRequests() {
           </button>
         </div>
       </header>
+
+      {toast && (
+        <div style={{ ...toastBox, ...(TOAST_TONES[toast.tone] || TOAST_TONES.info) }}>{toast.message}</div>
+      )}
 
       {error && <div style={errorBox}>{error}</div>}
 
@@ -170,6 +262,130 @@ export default function BookingRequests() {
   );
 }
 
+async function createAppointmentForRequest(request) {
+  const row = request?.raw || {};
+  const slotStartValue = pick(row, SLOT_START_COLUMNS) || row.slot_start_at || row.start_at;
+  const startDate = parseDate(slotStartValue);
+  if (!startDate) {
+    throw new Error("Unable to create appointment — the booking request is missing a slot start time.");
+  }
+
+  const duration = pickNumber(row, SLOT_DURATION_COLUMNS) || DEFAULT_APPOINTMENT_DURATION;
+  const endDate = Number.isFinite(duration) ? new Date(startDate.getTime() + duration * 60000) : null;
+
+  const payload = {
+    start_at: startDate.toISOString(),
+    end_at: endDate ? endDate.toISOString() : null,
+    location: pick(row, SLOT_LOCATION_COLUMNS) || null,
+    notes: request.notes || row.notes || row.internal_notes || null,
+    patient_name: request.displayName || null,
+    patient_email: request.email || row.email || row.contact_email || null,
+    patient_phone: request.phone || row.phone || row.phone_number || row.contact_phone || null,
+    booking_request_id: row.id || null,
+    slot_id: row.slot_id || row.appointment_slot_id || row.slot || null,
+    source: "booking_request",
+  };
+
+  const optionalColumns = Object.keys(payload).filter((column) => column !== "start_at");
+  let attempt = { ...payload };
+
+  while (true) {
+    const cleaned = cleanInsertPayload(attempt);
+    const { data, error } = await supabase.from("appointments").insert([cleaned]).select("*").single();
+    if (!error) {
+      return data;
+    }
+
+    const missing = findMissingColumn(error, optionalColumns.filter((column) => column in attempt));
+    if (missing) {
+      delete attempt[missing];
+      continue;
+    }
+
+    throw error;
+  }
+}
+
+async function reserveSlotById(slotId) {
+  if (!slotId) return;
+  for (const source of SLOT_SOURCES) {
+    const client = source.schema ? supabase.schema(source.schema) : supabase;
+    for (const reserveColumn of SLOT_RESERVATION_COLUMNS) {
+      const updatePayload = { [reserveColumn]: true };
+      const matchColumns = ["id", "slot_id", "uuid", "reference"];
+      for (const matchColumn of matchColumns) {
+        try {
+          const response = await client.from(source.table).update(updatePayload).eq(matchColumn, slotId);
+          if (!response?.error) {
+            return;
+          }
+          if (isMissingColumnError(response.error, reserveColumn)) {
+            break;
+          }
+          if (isMissingColumnError(response.error, matchColumn)) {
+            continue;
+          }
+        } catch (err) {
+          console.warn("Failed to reserve slot", err);
+        }
+      }
+    }
+  }
+}
+
+async function rollbackAppointment(appointmentId) {
+  if (!appointmentId) return;
+  try {
+    await supabase.from("appointments").delete().eq("id", appointmentId);
+  } catch (err) {
+    console.warn("Unable to rollback appointment", err);
+  }
+}
+
+async function notifyRequestProcessed(request, status, appointmentRecord) {
+  try {
+    const user = (await supabase.auth.getUser()).data?.user;
+    await supabase.functions.invoke("notify-email", {
+      body: {
+        type: "booking_request_processed",
+        status,
+        actorEmail: user?.email || null,
+        request: {
+          id: request?.raw?.id || null,
+          first_name: pick(request?.raw, FIRST_NAME_COLUMNS) || request?.displayName || "",
+          surname: pick(request?.raw, LAST_NAME_COLUMNS) || "",
+          email: request?.email || request?.raw?.email || null,
+          phone: request?.phone || request?.raw?.phone || request?.raw?.phone_number || null,
+          slot_summary: request?.slotSummary || formatAppointmentToastSummary(appointmentRecord) || null,
+        },
+        appointment: appointmentRecord
+          ? {
+              id: appointmentRecord.id,
+              start_at: appointmentRecord.start_at || null,
+              end_at: appointmentRecord.end_at || null,
+              location: appointmentRecord.location || null,
+            }
+          : null,
+      },
+    });
+  } catch (err) {
+    console.error("notify-email invocation failed", err);
+  }
+}
+
+function formatAppointmentToastSummary(appointment) {
+  if (!appointment) return null;
+  const start = appointment.start_at ? parseDate(appointment.start_at) : null;
+  const parts = [];
+  if (start) {
+    parts.push(format(start, "d MMM yyyy HH:mm"));
+  }
+  if (appointment.location) {
+    parts.push(appointment.location);
+  }
+  return parts.join(" • ") || null;
+}
+
 function Info({ label, value }) {
   if (!value) return null;
   return (
@@ -178,6 +394,35 @@ function Info({ label, value }) {
       <span>{value}</span>
     </div>
   );
+}
+
+function cleanInsertPayload(record) {
+  return Object.entries(record).reduce((acc, [key, value]) => {
+    if (value !== null && value !== undefined && value !== "") {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
+}
+
+function findMissingColumn(error, candidates) {
+  if (!error?.message) return null;
+  const message = error.message.toLowerCase();
+  return candidates.find((column) =>
+    column && message.includes(column.toLowerCase()) && message.includes("does not exist")
+  );
+}
+
+function pickNumber(row, columns) {
+  if (!row) return null;
+  for (const column of columns) {
+    if (!(column in row)) continue;
+    const value = row[column];
+    if (value == null) continue;
+    const num = typeof value === "number" ? value : Number(value);
+    if (!Number.isNaN(num)) return num;
+  }
+  return null;
 }
 
 function normaliseRequest(row) {
@@ -288,6 +533,41 @@ function formatFriendlyError(error) {
   return message;
 }
 
+function getSlotSources() {
+  const configured = process.env.REACT_APP_APPOINTMENT_SLOT_SOURCES;
+  if (!configured) {
+    return [
+      { schema: null, table: "appointment_slots", filterColumn: "start_at" },
+      { schema: "bookings", table: "appointment_slots", filterColumn: "start_at" },
+      { schema: null, table: "available_appointment_slots", filterColumn: "start_at" },
+    ];
+  }
+
+  return configured
+    .split(",")
+    .map(parseSlotSource)
+    .filter(Boolean);
+}
+
+function parseSlotSource(entry) {
+  const raw = (entry || "").trim();
+  if (!raw) return null;
+
+  let schema = null;
+  let table = raw;
+
+  const separator = raw.includes(":") ? ":" : raw.includes(".") ? "." : null;
+  if (separator) {
+    const [schemaPart, tablePart] = raw.split(separator);
+    schema = schemaPart ? schemaPart.trim() || null : null;
+    table = (tablePart || "").trim();
+  }
+
+  if (!table) return null;
+
+  return { schema: schema || null, table, filterColumn: "start_at" };
+}
+
 const container = {
   display: "flex",
   flexDirection: "column",
@@ -386,6 +666,12 @@ const notes = {
   padding: 12,
   borderRadius: 10,
   margin: 0,
+};
+
+const toastBox = {
+  borderRadius: 10,
+  padding: 12,
+  color: "var(--text)",
 };
 
 const errorBox = {
