@@ -15,7 +15,13 @@ const STATUS_TABS = [
 
 const PAGE_SIZE = 50;
 
-export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedule }) {
+export default function Dashboard({
+  isAdmin,
+  onOpenAdminSettings,
+  onOpenAnalytics,
+  onOpenPartner,
+  onOpenSchedule,
+}) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [notes, setNotes] = useState("");
@@ -355,7 +361,12 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
           >
             ↑ Top
           </button>
-          {onOpenAnalytics && (
+          {isAdmin && onOpenAdminSettings && (
+            <button style={btn} onClick={onOpenAdminSettings}>
+              Admin Settings
+            </button>
+          )}
+          {isAdmin && onOpenAnalytics && (
             <button style={btn} onClick={onOpenAnalytics}>
               Admin Analytics
             </button>

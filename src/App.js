@@ -6,6 +6,7 @@ import Dashboard from "./Dashboard";
 import ClinicianSchedule from "./ClinicianSchedule";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
+import AdminSettings from "./AdminSettings";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
@@ -172,7 +173,13 @@ export default function App() {
       case "dashboard":
         return authed ? (
           <Dashboard
-            onOpenAnalytics={() => window.setView("analytics")}
+            isAdmin={isAdmin}
+            onOpenAdminSettings={
+              isAdmin ? () => window.setView("adminSettings") : undefined
+            }
+            onOpenAnalytics={
+              isAdmin ? () => window.setView("analytics") : undefined
+            }
             onOpenPartner={() => window.setView("partner")}
             onOpenSchedule={() => window.setView("schedule")}
           />
@@ -190,6 +197,15 @@ export default function App() {
       case "analytics":
         return authed && isAdmin ? (
           <AdminAnalytics onBack={() => window.setView("dashboard")} />
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
+      case "adminSettings":
+        return authed && isAdmin ? (
+          <AdminSettings onBack={() => window.setView("dashboard")} />
         ) : authed ? (
           <NoAccess onBack={() => window.setView("dashboard")} />
         ) : (
@@ -437,6 +453,18 @@ function NavMenu({ authed, isAdmin, current }) {
             }}
           >
             Analytics
+          </MenuItem>
+        )}
+
+        {authed && isAdmin && (
+          <MenuItem
+            active={current === "adminSettings"}
+            onClick={() => {
+              window.setView("adminSettings");
+              setOpen(false);
+            }}
+          >
+            Admin Settings
           </MenuItem>
         )}
 
