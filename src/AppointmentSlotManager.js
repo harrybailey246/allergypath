@@ -319,7 +319,7 @@ export default function AppointmentSlotManager() {
                 {slots.map((slot, index) => (
                   <tr key={buildSlotKey(slot, index)}>
                     <td style={td}>{formatSlotStart(slot.start_at)}</td>
-                    <td style={td}>{slot.duration_mins ? `${slot.duration_mins} mins` : "—"}</td>
+                    <td style={td}>{renderDuration(slot)}</td>
                     <td style={td}>{slot.location || "—"}</td>
                     <td style={td}>{renderMoney(slot.price_cents, slot.price, slot.currency)}</td>
                     <td style={td}>{renderMoney(slot.deposit_cents, slot.deposit, slot.currency)}</td>
@@ -452,6 +452,21 @@ function renderMoney(cents, amount, currency = "GBP") {
   const normalised = normalizeMoneyValue(cents, amount);
   if (normalised == null) return "—";
   return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(normalised / 100);
+}
+
+function renderDuration(slot) {
+  if (!slot) return "—";
+  const value = slot.duration_mins ?? slot.duration_minutes ?? null;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return `${value} mins`;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed) && Number.isFinite(parsed) && parsed > 0) {
+      return `${parsed} mins`;
+    }
+  }
+  return "—";
 }
 
 function buildSlotKey(slot, index) {
