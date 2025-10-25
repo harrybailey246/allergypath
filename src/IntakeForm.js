@@ -172,11 +172,12 @@ export default function IntakeForm() {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, []);
-  const [test_notes, setTestNotes] = useState("");
+  const [patient_notes, setPatientNotes] = useState("");
 
   // UX
   const [submitting, setSubmitting] = useState(false);
   const [okMsg, setOkMsg] = useState("");
+  const [warnMsg, setWarnMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
   const [errors, setErrors] = useState({}); // ✅ inline errors per step
 
@@ -227,11 +228,26 @@ export default function IntakeForm() {
   };
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
+  const isPatientNotesColumnError = useCallback((err) => {
+    if (!err) return false;
+
+    const haystack = [err.message, err.details, err.hint]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (haystack.includes("patient_notes")) return true;
+
+    // Supabase may surface undefined column as either Postgres (42703) or PostgREST (PGRST204/PGRST302).
+    return ["42703", "PGRST204", "PGRST302"].includes(err.code);
+  }, []);
+
   async function handleSubmit() {
     if (!validateStep(6)) return;
 
     setSubmitting(true);
     setOkMsg("");
+    setWarnMsg("");
     setErrMsg("");
     try {
       const payload = {
@@ -265,16 +281,37 @@ export default function IntakeForm() {
 
         has_auto_injector,
         carries_auto_injector,
-
-        test_notes: test_notes || null,
       };
 
+      const trimmedNotes = patient_notes.trim();
+      if (trimmedNotes) {
+        payload.patient_notes = trimmedNotes;
+      }
+
+      let schemaMismatch = false;
+
       // 1) create record first
-      const { data: created, error: insErr } = await supabase
+      const baseInsert = await supabase
         .from("submissions")
         .insert([payload])
         .select("*")
         .single();
+
+      let created = baseInsert.data;
+      let insErr = baseInsert.error;
+
+      if (isPatientNotesColumnError(insErr)) {
+        schemaMismatch = true;
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.patient_notes;
+        const retryInsert = await supabase
+          .from("submissions")
+          .insert([fallbackPayload])
+          .select("*")
+          .single();
+        created = retryInsert.data;
+        insErr = retryInsert.error;
+      }
 
       if (insErr) throw insErr;
       const submissionId = created.id;
@@ -320,16 +357,28 @@ export default function IntakeForm() {
         }
       }
 
-      setOkMsg(
-        uploadErr
-          ? "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them."
-          : "Thanks — your form was submitted successfully."
-      );
-      setErrMsg(
-        uploadErr
-          ? "Your form went through, but some files failed to upload. Please email any important documents to the clinic."
-          : ""
-      );
+      let okMessage = "Thanks — your form was submitted successfully.";
+      let warnMessage = "";
+
+      if (uploadErr && schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files or your final notes. We'll be in touch if we need them.";
+        warnMessage =
+          "Your form went through, but some files and your final notes failed to save. Please email any important information to the clinic.";
+      } else if (uploadErr) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them.";
+        warnMessage =
+          "Your form went through, but some files failed to upload. Please email any important documents to the clinic.";
+      } else if (schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save your final notes just yet. We'll make sure the team receives your submission.";
+        warnMessage =
+          "Your form went through, but the notes field is still updating. Please email any urgent notes to the clinic.";
+      }
+
+      setOkMsg(okMessage);
+      setWarnMsg(warnMessage);
       // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
@@ -340,7 +389,7 @@ export default function IntakeForm() {
       setFoodTriggers([]); setOtherTriggers(""); setBakedEgg(false); setBakedMilk(false);
       setAsthma(""); setEczema(false); setHayFever(false); setOtherConditions("");
       setLastAnti(""); setBB(false); setACE(false); setPregnant(false);
-      setHasAI(false); setCarriesAI(false); setTestNotes("");
+      setHasAI(false); setCarriesAI(false); setPatientNotes("");
       setErrors({});
     } catch (e) {
       console.error(e);
@@ -569,7 +618,7 @@ export default function IntakeForm() {
         return (
           <Page>
             <h2 style={{ marginTop: 0 }}>Review & submit</h2>
-            <Row><Label>Any final notes? (optional)</Label><Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} /></Row>
+            <Row><Label>Any final notes? (optional)</Label><Textarea value={patient_notes} onChange={(e) => setPatientNotes(e.target.value)} /></Row>
             <Row>
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
@@ -596,6 +645,11 @@ export default function IntakeForm() {
       {errMsg && (
         <div style={{ background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "var(--danger)", padding: 10, borderRadius: 8, marginBottom: 10 }}>
           ❌ {errMsg}
+        </div>
+      )}
+      {warnMsg && !errMsg && (
+        <div style={{ background: "rgba(250, 204, 21, 0.12)", border: "1px solid rgba(250, 204, 21, 0.35)", color: "#854d0e", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+          ⚠️ {warnMsg}
         </div>
       )}
       {okMsg && (
