@@ -88,7 +88,7 @@ export default function AppointmentSlotManager() {
           `The source ${describeSource(activeSource)} does not exist. Update REACT_APP_APPOINTMENT_SLOT_SOURCES.
         );
       } else {
-        setError(err?.message || "Unable to load appointment slots.");
+        setError((err && err.message) || "Unable to load appointment slots.");
       }
       setSlots([]);
     } finally {
@@ -170,7 +170,7 @@ export default function AppointmentSlotManager() {
       setStatus(next ? "Slot marked as booked." : "Slot made available.");
     } catch (err) {
       console.error(err);
-      setError(err?.message || "Unable to update the slot.");
+      setError((err && err.message) || "Unable to update the slot.");
       setSlots(previous);
     } finally {
       await loadSlots();
@@ -202,7 +202,7 @@ export default function AppointmentSlotManager() {
       setStatus("Slot deleted.");
     } catch (err) {
       console.error(err);
-      setError(err?.message || "Unable to delete the slot.");
+      setError((err && err.message) || "Unable to delete the slot.");
       setSlots(previous);
     } finally {
       await loadSlots();
@@ -247,7 +247,7 @@ export default function AppointmentSlotManager() {
       await loadSlots();
     } catch (err) {
       console.error(err);
-      setError(err?.message || "Unable to save the slot.");
+      setError((err && err.message) || "Unable to save the slot.");
     } finally {
       setSaving(false);
     }
@@ -454,9 +454,19 @@ function renderMoney(cents, amount, currency = "GBP") {
   return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(normalised / 100);
 }
 
+function firstDefined() {
+  for (let index = 0; index < arguments.length; index += 1) {
+    const value = arguments[index];
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function renderDuration(slot) {
   if (!slot) return "—";
-  const value = slot.duration_mins ?? slot.duration_minutes ?? null;
+  const value = firstDefined(slot.duration_mins, slot.duration_minutes);
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return `${value} mins`;
   }
@@ -471,8 +481,9 @@ function renderDuration(slot) {
 
 function buildSlotKey(slot, index) {
   if (!slot) return `slot-${index}`;
-  const primary = slot.__primaryValue ?? slot.__raw?.id ?? slot.id ?? null;
-  const start = slot.start_at ?? null;
+  const raw = slot.__raw;
+  const primary = firstDefined(slot.__primaryValue, raw && raw.id, slot.id);
+  const start = slot.start_at != null ? slot.start_at : null;
   if (primary && start) {
     return `${primary}-${start}`;
   }
@@ -551,9 +562,9 @@ function normalizeForm(form, columnMap) {
   const startIso = fromLocalInput(form.start_at);
   const duration = Number(form.duration_mins);
   const durationValue = Number.isFinite(duration) ? Math.round(duration) : null;
-  const locationInput = form.location ?? "";
+  const locationInput = form.location != null ? form.location : "";
   const location = locationInput.trim() || null;
-  const paymentLinkInput = form.payment_link ?? "";
+  const paymentLinkInput = form.payment_link != null ? form.payment_link : "";
   const paymentLink = paymentLinkInput.trim() || null;
   const isBooked = Boolean(form.is_booked);
 
@@ -568,12 +579,18 @@ function normalizeForm(form, columnMap) {
   const priceValue = parseMoney(form.price);
   const depositValue = parseMoney(form.deposit);
 
-  if (columnMap.price_cents?.length || columnMap.price?.length) {
+  const hasPriceColumn =
+    (columnMap.price_cents && columnMap.price_cents.length > 0) ||
+    (columnMap.price && columnMap.price.length > 0);
+  if (hasPriceColumn) {
     updates.price_cents = priceValue != null ? Math.round(priceValue * 100) : null;
     updates.price = priceValue != null ? Number(priceValue.toFixed(2)) : null;
   }
 
-  if (columnMap.deposit_cents?.length || columnMap.deposit?.length) {
+  const hasDepositColumn =
+    (columnMap.deposit_cents && columnMap.deposit_cents.length > 0) ||
+    (columnMap.deposit && columnMap.deposit.length > 0);
+  if (hasDepositColumn) {
     updates.deposit_cents = depositValue != null ? Math.round(depositValue * 100) : null;
     updates.deposit = depositValue != null ? Number(depositValue.toFixed(2)) : null;
   }
