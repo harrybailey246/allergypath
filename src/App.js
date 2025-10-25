@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 import IntakeForm from "./IntakeForm";
 import Dashboard from "./Dashboard";
+import ClinicianSchedule from "./ClinicianSchedule";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
@@ -173,6 +174,13 @@ export default function App() {
             onOpenAnalytics={() => window.setView("analytics")}
             onOpenPartner={() => window.setView("partner")}
           />
+        ) : (
+          <Login />
+        );
+
+      case "schedule":
+        return authed ? (
+          <ClinicianSchedule onBack={() => window.setView("dashboard")} />
         ) : (
           <Login />
         );
@@ -359,6 +367,18 @@ function NavMenu({ authed, isAdmin, current }) {
         >
           Dashboard
         </MenuItem>
+
+        {authed && (
+          <MenuItem
+            active={current === "schedule"}
+            onClick={() => {
+              window.setView("schedule");
+              setOpen(false);
+            }}
+          >
+            Clinician Schedule
+          </MenuItem>
+        )}
 
         {authed && (
           <MenuItem
