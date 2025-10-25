@@ -173,6 +173,7 @@ export default function App() {
           <Dashboard
             onOpenAnalytics={() => window.setView("analytics")}
             onOpenPartner={() => window.setView("partner")}
+            onOpenSchedule={() => window.setView("schedule")}
           />
         ) : (
           <Login />

@@ -15,7 +15,7 @@ const STATUS_TABS = [
 
 const PAGE_SIZE = 50;
 
-export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
+export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedule }) {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [notes, setNotes] = useState("");
@@ -188,6 +188,11 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h1 style={{ margin: 0 }}>Clinician Dashboard</h1>
         <div style={{ display: "flex", gap: 8 }}>
+          {onOpenSchedule && (
+            <button style={btn} onClick={onOpenSchedule}>
+              Clinician Schedule
+            </button>
+          )}
           {onOpenPartner && (
             <button style={btn} onClick={onOpenPartner}>
               Partner Tools
