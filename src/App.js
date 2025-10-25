@@ -5,10 +5,12 @@ import IntakeForm from "./IntakeForm";
 import Dashboard from "./Dashboard";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
+import AdminSettings from "./AdminSettings";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
 import PartnerPortal from "./PartnerPortal";
+import ClinicianSchedule from "./ClinicianSchedule";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -88,6 +90,7 @@ export default function App() {
     (typeof window !== "undefined" && window.location.hash.replace("#", "")) || "intake"
   );
   const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState(null);
   const [theme, setTheme] = useState("light");
 
   // Theme: load & apply on boot
@@ -151,18 +154,24 @@ export default function App() {
   useEffect(() => {
     const getRole = async () => {
       setIsAdmin(false);
+      setRole(null);
       if (!user?.email) return;
       const { data, error } = await supabase
         .from("clinician_emails")
         .select("role")
         .eq("email", (user.email || "").toLowerCase())
         .maybeSingle();
-      if (!error && data?.role === "admin") setIsAdmin(true);
+      if (!error) {
+        const nextRole = data?.role ?? null;
+        setRole(nextRole);
+        if (nextRole === "admin") setIsAdmin(true);
+      }
     };
     getRole();
   }, [user?.email]);
 
   const authed = !!user;
+  const isClinician = (role === "clinician" || role === "admin") && authed;
 
   // View routing
   const renderView = () => {
@@ -186,11 +195,29 @@ export default function App() {
           <Login />
         );
 
+      case "admin-settings":
+        return authed && isAdmin ? (
+          <AdminSettings onBack={() => window.setView("dashboard")} />
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
       case "book":
         return (
           <ThemedPage title="Book & Pay">
             <BookAndPay />
           </ThemedPage>
+        );
+
+      case "clinician-schedule":
+        return isClinician ? (
+          <ClinicianSchedule onBack={() => window.setView("dashboard")} />
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
         );
 
       case "patientPortal":
@@ -270,7 +297,12 @@ export default function App() {
         </div>
 
         {/* Dropdown Navigation */}
-        <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+        <NavMenu
+          authed={authed}
+          isAdmin={isAdmin}
+          isClinician={isClinician}
+          current={view}
+        />
       </header>
 
       {/* Main content */}
@@ -280,7 +312,7 @@ export default function App() {
 }
 
 /* ------------ Dropdown Menu ------------ */
-function NavMenu({ authed, isAdmin, current }) {
+function NavMenu({ authed, isAdmin, isClinician, current }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
 
@@ -372,6 +404,18 @@ function NavMenu({ authed, isAdmin, current }) {
           </MenuItem>
         )}
 
+        {authed && isClinician && (
+          <MenuItem
+            active={current === "clinician-schedule"}
+            onClick={() => {
+              window.setView("clinician-schedule");
+              setOpen(false);
+            }}
+          >
+            Clinician Schedule
+          </MenuItem>
+        )}
+
         {authed && isAdmin && (
           <MenuItem
             active={current === "analytics"}
@@ -381,6 +425,18 @@ function NavMenu({ authed, isAdmin, current }) {
             }}
           >
             Analytics
+          </MenuItem>
+        )}
+
+        {authed && isAdmin && (
+          <MenuItem
+            active={current === "admin-settings"}
+            onClick={() => {
+              window.setView("admin-settings");
+              setOpen(false);
+            }}
+          >
+            Admin Settings
           </MenuItem>
         )}
 
