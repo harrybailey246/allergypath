@@ -332,32 +332,64 @@ export default function IntakeForm() {
 
             <Row>
               <Label>First name *</Label>
-              <Input value={first_name} onChange={(e) => setFirstName(e.target.value)} />
+              <Input
+                id="first_name"
+                name="first_name"
+                value={first_name}
+                onChange={(e) => setFirstName(e.target.value)}
+              />
               {errors.first_name && <ErrorText>{errors.first_name}</ErrorText>}
             </Row>
             <Row>
               <Label>Surname *</Label>
-              <Input value={surname} onChange={(e) => setSurname(e.target.value)} />
+              <Input
+                id="surname"
+                name="surname"
+                value={surname}
+                onChange={(e) => setSurname(e.target.value)}
+              />
               {errors.surname && <ErrorText>{errors.surname}</ErrorText>}
             </Row>
             <Row>
               <Label>Email *</Label>
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
               {errors.email && <ErrorText>{errors.email}</ErrorText>}
             </Row>
             <Row>
               <Label>Phone *</Label>
-              <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <Input
+                id="phone"
+                name="phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
               {errors.phone && <ErrorText>{errors.phone}</ErrorText>}
             </Row>
             <Row>
               <Label>Date of birth *</Label>
-              <Input type="date" value={date_of_birth} onChange={(e) => setDOB(e.target.value)} />
+              <Input
+                id="date_of_birth"
+                name="date_of_birth"
+                type="date"
+                value={date_of_birth}
+                onChange={(e) => setDOB(e.target.value)}
+              />
               {errors.date_of_birth && <ErrorText>{errors.date_of_birth}</ErrorText>}
             </Row>
             <Row>
               <Label>NHS number (optional)</Label>
-              <Input value={nhs_number} onChange={(e) => setNhs(e.target.value)} />
+              <Input
+                id="nhs_number"
+                name="nhs_number"
+                value={nhs_number}
+                onChange={(e) => setNhs(e.target.value)}
+              />
             </Row>
 
             <div style={{ display: "flex", gap: 8 }}>
