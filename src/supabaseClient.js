@@ -3,16 +3,33 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim();
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY?.trim();
 
-if (!supabaseUrl) {
-  throw new Error(
-    "Missing Supabase URL. Set the REACT_APP_SUPABASE_URL environment variable (e.g. in .env.local)."
+const missingConfigMessage =
+  "Supabase credentials are not configured. Define REACT_APP_SUPABASE_URL and REACT_APP_SUPABASE_ANON_KEY in your environment.";
+
+const createMissingConfigClient = () =>
+  new Proxy(
+    {},
+    {
+      get() {
+        throw new Error(missingConfigMessage);
+      },
+      apply() {
+        throw new Error(missingConfigMessage);
+      },
+    }
   );
+
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+if (!isSupabaseConfigured && typeof console !== "undefined") {
+  const message =
+    missingConfigMessage +
+    " Visit the project README for setup instructions or update your Vercel project environment variables.";
+  if (process.env.NODE_ENV !== "production") {
+    console.warn(message);
+  }
 }
 
-if (!supabaseAnonKey) {
-  throw new Error(
-    "Missing Supabase anon key. Set the REACT_APP_SUPABASE_ANON_KEY environment variable (e.g. in .env.local)."
-  );
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : createMissingConfigClient();
