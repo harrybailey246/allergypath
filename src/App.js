@@ -274,6 +274,52 @@ export default function App() {
           from { opacity: 0; transform: translateY(-8px) scale(0.98); }
           to { opacity: 1; transform: translateY(0) scale(1); }
         }
+
+        .menu-section__toggle {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          background: transparent;
+          border: none;
+          color: var(--muted);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          padding: 10px 12px;
+        }
+
+        .menu-section__toggle::after {
+          content: "";
+          flex: 1;
+          height: 1px;
+          background: var(--border);
+          margin-left: 12px;
+          opacity: 0.6;
+        }
+
+        .menu-section__toggle span {
+          flex: none;
+        }
+
+        .menu-section__list {
+          display: grid;
+          gap: 2px;
+          padding: 6px 0 8px 0;
+          margin: 0;
+        }
+
+        .menu-section__list.collapsed {
+          display: none;
+        }
+
+        .menu-section__item {
+          padding-left: 26px;
+          font-size: 13px;
+        }
       `}</style>
       {/* Header / Nav */}
       <header
@@ -390,6 +436,7 @@ export default function App() {
 function NavMenu({ authed, isAdmin, current }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
+  const [expanded, setExpanded] = React.useState({});
 
   // close on outside click or Esc
   React.useEffect(() => {
@@ -404,6 +451,82 @@ function NavMenu({ authed, isAdmin, current }) {
       window.removeEventListener("keydown", onEsc);
     };
   }, []);
+
+  const sections = React.useMemo(() => {
+    const config = [
+      {
+        id: "patient-experience",
+        label: "Patient Experience",
+        items: [
+          { label: "Patient Form", view: "intake" },
+          { label: "Book & Pay", view: "book" },
+          { label: "Patient Portal", view: "patientPortal" },
+        ],
+      },
+      {
+        id: "clinician-tools",
+        label: "Clinician Tools",
+        items: [
+          { label: "Dashboard", view: "dashboard" },
+          { label: "Clinician Schedule", view: "schedule", requiresAuth: true },
+          { label: "Partner Tools", view: "partner", requiresAuth: true },
+        ],
+      },
+      {
+        id: "admin",
+        label: "Admin",
+        items: [
+          {
+            label: "Booking Requests",
+            view: "bookingRequests",
+            requiresAuth: true,
+            requiresAdmin: true,
+          },
+          {
+            label: "Analytics",
+            view: "analytics",
+            requiresAuth: true,
+            requiresAdmin: true,
+          },
+          {
+            label: "Admin Settings",
+            view: "adminSettings",
+            requiresAuth: true,
+            requiresAdmin: true,
+          },
+        ],
+      },
+    ];
+
+    return config
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => {
+          if (item.requiresAdmin && !isAdmin) return false;
+          if (item.requiresAuth && !authed) return false;
+          return true;
+        }),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [authed, isAdmin]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setExpanded((prev) => {
+      if (Object.keys(prev).length > 0) return prev;
+      if (sections.length === 0) return prev;
+      return { [sections[0].id]: true };
+    });
+  }, [open, sections]);
+
+  const handleSectionToggle = (id) => {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const handleNavigate = (view) => {
+    window.setView(view);
+    setOpen(false);
+  };
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -427,105 +550,16 @@ function NavMenu({ authed, isAdmin, current }) {
           transform: open ? "translateY(0) scale(1)" : "translateY(-6px) scale(0.97)",
         }}
       >
-        <MenuItem
-          active={current === "intake"}
-          onClick={() => {
-            window.setView("intake");
-            setOpen(false);
-          }}
-        >
-          Patient Form
-        </MenuItem>
-
-        <MenuItem
-          active={current === "book"}
-          onClick={() => {
-            window.setView("book");
-            setOpen(false);
-          }}
-        >
-          Book & Pay
-        </MenuItem>
-
-        <MenuItem
-          active={current === "patientPortal"}
-          onClick={() => {
-            window.setView("patientPortal");
-            setOpen(false);
-          }}
-        >
-          Patient Portal
-        </MenuItem>
-
-        <MenuItem
-          active={current === "dashboard"}
-          onClick={() => {
-            window.setView("dashboard");
-            setOpen(false);
-          }}
-        >
-          Dashboard
-        </MenuItem>
-
-        {authed && (
-          <MenuItem
-            active={current === "schedule"}
-            onClick={() => {
-              window.setView("schedule");
-              setOpen(false);
-            }}
-          >
-            Clinician Schedule
-          </MenuItem>
-        )}
-
-        {authed && (
-          <MenuItem
-            active={current === "partner"}
-            onClick={() => {
-              window.setView("partner");
-              setOpen(false);
-            }}
-          >
-            Partner Tools
-          </MenuItem>
-        )}
-
-        {authed && isAdmin && (
-          <MenuItem
-            active={current === "bookingRequests"}
-            onClick={() => {
-              window.setView("bookingRequests");
-              setOpen(false);
-            }}
-          >
-            Booking Requests
-          </MenuItem>
-        )}
-
-        {authed && isAdmin && (
-          <MenuItem
-            active={current === "analytics"}
-            onClick={() => {
-              window.setView("analytics");
-              setOpen(false);
-            }}
-          >
-            Analytics
-          </MenuItem>
-        )}
-
-        {authed && isAdmin && (
-          <MenuItem
-            active={current === "adminSettings"}
-            onClick={() => {
-              window.setView("adminSettings");
-              setOpen(false);
-            }}
-          >
-            Admin Settings
-          </MenuItem>
-        )}
+        {sections.map((section) => (
+          <MenuSection
+            key={section.id}
+            section={section}
+            current={current}
+            expanded={!!expanded[section.id]}
+            onToggle={() => handleSectionToggle(section.id)}
+            onNavigate={handleNavigate}
+          />
+        ))}
 
         <div style={{ borderTop: "1px solid var(--border)", margin: "6px 0" }} />
 
@@ -555,15 +589,46 @@ function NavMenu({ authed, isAdmin, current }) {
   );
 }
 
-function MenuItem({ children, onClick, active }) {
+function MenuItem({ children, onClick, active, className, style }) {
   return (
     <button
       role="menuitem"
       onClick={onClick}
-      style={{ ...menuItem, ...(active ? menuItemActive : {}) }}
+      className={className}
+      style={{ ...menuItem, ...style, ...(active ? menuItemActive : {}) }}
     >
       {children}
     </button>
+  );
+}
+
+function MenuSection({ section, current, expanded, onToggle, onNavigate }) {
+  return (
+    <div>
+      <button
+        type="button"
+        className="menu-section__toggle"
+        onClick={onToggle}
+        aria-expanded={expanded ? "true" : "false"}
+      >
+        <span>{section.label}</span>
+        <span>{expanded ? "▴" : "▾"}</span>
+      </button>
+
+      <div className={`menu-section__list${expanded ? "" : " collapsed"}`}>
+        {section.items.map((item) => (
+          <MenuItem
+            key={item.view}
+            active={current === item.view}
+            onClick={() => onNavigate(item.view)}
+            className="menu-section__item"
+            style={nestedMenuItem}
+          >
+            {item.label}
+          </MenuItem>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -642,6 +707,11 @@ const menuItemActive = {
   background: "rgba(37, 99, 235, 0.14)",
   color: "var(--primary)",
   fontWeight: 600,
+};
+
+const nestedMenuItem = {
+  paddingLeft: 26,
+  fontSize: 13,
 };
 
 /* ------------ No Access ------------- */
