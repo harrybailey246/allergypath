@@ -5,6 +5,7 @@ import IntakeForm from "./IntakeForm";
 import Dashboard from "./Dashboard";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
+import ClinicianSchedule from "./ClinicianSchedule";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
@@ -172,6 +173,7 @@ export default function App() {
           <Dashboard
             onOpenAnalytics={() => window.setView("analytics")}
             onOpenPartner={() => window.setView("partner")}
+            onOpenSchedule={() => window.setView("schedule")}
           />
         ) : (
           <Login />
@@ -182,6 +184,15 @@ export default function App() {
           <AdminAnalytics onBack={() => window.setView("dashboard")} />
         ) : authed ? (
           <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
+      case "schedule":
+        return authed ? (
+          <ThemedPage title="Clinician Schedule">
+            <ClinicianSchedule onBack={() => window.setView("dashboard")} />
+          </ThemedPage>
         ) : (
           <Login />
         );
@@ -361,15 +372,27 @@ function NavMenu({ authed, isAdmin, current }) {
         </MenuItem>
 
         {authed && (
-          <MenuItem
-            active={current === "partner"}
-            onClick={() => {
-              window.setView("partner");
-              setOpen(false);
-            }}
-          >
-            Partner Tools
-          </MenuItem>
+          <>
+            <MenuItem
+              active={current === "schedule"}
+              onClick={() => {
+                window.setView("schedule");
+                setOpen(false);
+              }}
+            >
+              Schedule
+            </MenuItem>
+
+            <MenuItem
+              active={current === "partner"}
+              onClick={() => {
+                window.setView("partner");
+                setOpen(false);
+              }}
+            >
+              Partner Tools
+            </MenuItem>
+          </>
         )}
 
         {authed && isAdmin && (
