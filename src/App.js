@@ -11,6 +11,7 @@ import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
 import PartnerPortal from "./PartnerPortal";
 import BookingRequests from "./BookingRequests";
+import AppointmentSlotManager from "./AppointmentSlotManager";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -200,6 +201,17 @@ export default function App() {
         return authed && isAdmin ? (
           <ThemedPage title="Booking Requests">
             <BookingRequests />
+          </ThemedPage>
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
+      case "slotManager":
+        return authed && isAdmin ? (
+          <ThemedPage title="Appointment Slots">
+            <AppointmentSlotManager />
           </ThemedPage>
         ) : authed ? (
           <NoAccess onBack={() => window.setView("dashboard")} />
@@ -425,6 +437,18 @@ function NavMenu({ authed, isAdmin, current }) {
             }}
           >
             Booking Requests
+          </MenuItem>
+        )}
+
+        {authed && isAdmin && (
+          <MenuItem
+            active={current === "slotManager"}
+            onClick={() => {
+              window.setView("slotManager");
+              setOpen(false);
+            }}
+          >
+            Appointment Slots
           </MenuItem>
         )}
 
