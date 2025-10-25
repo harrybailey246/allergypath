@@ -281,6 +281,8 @@ export default function IntakeForm() {
 
         has_auto_injector,
         carries_auto_injector,
+
+        patient_notes: patient_notes || null,
       };
 
       const trimmedNotes = patient_notes.trim();
@@ -301,6 +303,7 @@ export default function IntakeForm() {
       let insErr = baseInsert.error;
 
       if (isPatientNotesColumnError(insErr)) {
+      if (insErr && /patient_notes/.test(insErr.message || "")) {
         schemaMismatch = true;
         const fallbackPayload = { ...payload };
         delete fallbackPayload.patient_notes;
