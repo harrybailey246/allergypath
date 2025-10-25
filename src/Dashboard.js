@@ -1,8 +1,8 @@
 // src/Dashboard.js
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { format } from "date-fns";
-import { createEvent } from "ics";
 import { supabase } from "./supabaseClient";
+import { createAppointmentICS } from "./utils/calendar";
 
 const STATUS_TABS = [
   { key: "all", label: "All" },
@@ -369,6 +369,7 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
 
   // scheduling state + loaders
   const [appointments, setAppointments] = React.useState([]);
+  const [appointmentRequests, setAppointmentRequests] = React.useState([]);
   const [startAt, setStartAt] = React.useState("");
   const [endAt, setEndAt] = React.useState("");
   const [location, setLocation] = React.useState("");
@@ -383,6 +384,15 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
     if (!error) setAppointments(data || []);
   }, [row.id]);
 
+  const fetchAppointmentRequests = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("appointment_requests")
+      .select("id, created_at, appointment_id, request_type, message, status, patient_email, handled_at")
+      .eq("submission_id", row.id)
+      .order("created_at", { ascending: false });
+    if (!error) setAppointmentRequests(data || []);
+  }, [row.id]);
+
   React.useEffect(() => {
     fetchAppointments();
     const ch = supabase
@@ -395,6 +405,19 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [fetchAppointments, row.id]);
+
+  React.useEffect(() => {
+    fetchAppointmentRequests();
+    const ch = supabase
+      .channel(`appointment-requests-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "appointment_requests", filter: `submission_id=eq.${row.id}` },
+        fetchAppointmentRequests
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchAppointmentRequests, row.id]);
 
   const createAppointment = async () => {
     if (!startAt || !endAt) {
@@ -421,34 +444,33 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
     fetchAppointments();
   };
 
-  const downloadICS = (appt) => {
-    const start = new Date(appt.start_at);
-    const end = new Date(appt.end_at);
-    const { error, value } = createEvent({
-      title: `AllergyPath Appointment – ${row.first_name} ${row.surname}`,
-      start: [start.getFullYear(), start.getMonth() + 1, start.getDate(), start.getHours(), start.getMinutes()],
-      end: [end.getFullYear(), end.getMonth() + 1, end.getDate(), end.getHours(), end.getMinutes()],
-      location: appt.location || "",
-      description: [
-        `Patient: ${row.first_name} ${row.surname}`,
-        `Email: ${row.email}`,
-        row.most_severe_reaction ? `Hx: ${row.most_severe_reaction}` : "",
-        appt.notes ? `Notes: ${appt.notes}` : "",
-      ].filter(Boolean).join("\n"),
-      status: "CONFIRMED",
-    });
+  const updateRequestStatus = async (request, status) => {
+    const { error } = await supabase
+      .from("appointment_requests")
+      .update({
+        status,
+        handled_at: status === "resolved" ? new Date().toISOString() : null,
+      })
+      .eq("id", request.id);
     if (error) {
-      alert("ICS error: " + error.message);
-      return;
+      alert("Failed to update request: " + error.message);
+    } else {
+      fetchAppointmentRequests();
     }
-    const blob = new Blob([value], { type: "text/calendar;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const fname = `AllergyPath_${row.first_name}_${row.surname}_${format(start, "yyyyMMdd_HHmm")}.ics`;
-    a.href = url;
-    a.download = fname.replace(/\s+/g, "_");
-    a.click();
-    URL.revokeObjectURL(url);
+  };
+
+  const downloadICS = (appt) => {
+    try {
+      const { blob, filename } = createAppointmentICS(appt, row);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("ICS error: " + (error?.message || "Unable to generate file"));
+    }
   };
 
   // comments thread
@@ -583,6 +605,39 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
           </div>
         </>
       )}
+
+      <h4 style={{ marginTop: 16 }}>Patient requests</h4>
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, display: "grid", gap: 8 }}>
+        {appointmentRequests.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No requests yet.</div>
+        ) : (
+          appointmentRequests.map((req) => {
+            const appt = appointments.find((a) => a.id === req.appointment_id);
+            return (
+              <div key={req.id} style={{ borderBottom: "1px solid #f3f4f6", paddingBottom: 8, marginBottom: 4 }}>
+                <div style={{ fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ textTransform: "capitalize" }}>{req.request_type}</span>
+                  <Badge color={req.status === "resolved" ? "#059669" : "#d97706"}>{req.status}</Badge>
+                </div>
+                <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>
+                  {new Date(req.created_at).toLocaleString("en-GB")} • {req.patient_email || "Unknown"}
+                </div>
+                {appt && (
+                  <div style={{ color: "#6b7280", fontSize: 12, marginTop: 4 }}>
+                    Related appointment: {format(new Date(appt.start_at), "EEE d MMM yyyy HH:mm")}
+                  </div>
+                )}
+                {req.message && <div style={{ marginTop: 6 }}>{req.message}</div>}
+                {req.status !== "resolved" && (
+                  <div style={{ marginTop: 8 }}>
+                    <button onClick={() => updateRequestStatus(req, "resolved")} style={btn}>Mark resolved</button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
 
       {/* Comments thread */}
       <h4 style={{ marginTop: 16 }}>Clinician thread</h4>
