@@ -48,24 +48,36 @@ export default function PartnerPortal() {
   const [lastRefreshed, setLastRefreshed] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const toastTimeoutRef = React.useRef(null);
+  const [checkInMutatingId, setCheckInMutatingId] = React.useState(null);
+  const [printingLabelId, setPrintingLabelId] = React.useState(null);
+  const [restockOpen, setRestockOpen] = React.useState(false);
+  const [restockItem, setRestockItem] = React.useState("");
+  const [restockQuantity, setRestockQuantity] = React.useState("1");
+  const [restockNotes, setRestockNotes] = React.useState("");
+  const [restockSubmitting, setRestockSubmitting] = React.useState(false);
 
   const loadData = React.useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const [scheduleRes, checkInsRes, labelQueueRes, stockRes, earningsRes] = await Promise.all([
-        supabase.from("partner_today_schedule").select("*").order("start_at", { ascending: true }),
+        supabase
+          .from("partner_today_schedule")
+          .select("id,start_at,patient_name,purpose,location")
+          .order("start_at", { ascending: true }),
         supabase
           .from("partner_checkins")
-          .select("patient_name,status,arrived_at")
+          .select("id,patient_name,status,arrived_at")
           .order("arrived_at", { ascending: true }),
         supabase
           .from("partner_label_queue")
-          .select("label_code,patient_name,request_type,priority,created_at")
+          .select("id,label_code,patient_name,request_type,priority,created_at,printed_at")
           .order("created_at", { ascending: true }),
         supabase
           .from("partner_stock_levels")
-          .select("item_name,quantity,unit,status,updated_at")
+          .select("id,item_name,quantity,unit,status,updated_at")
           .order("item_name", { ascending: true }),
         supabase.from("partner_earnings_summary").select("scope,amount"),
       ]);
@@ -106,6 +118,90 @@ export default function PartnerPortal() {
     loadData();
   }, [loadData]);
 
+  const showToast = React.useCallback((tone, message) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ tone, message });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleMarkReady = async (checkIn) => {
+    if (!checkIn?.id) return;
+    setCheckInMutatingId(checkIn.id);
+    try {
+      const { error } = await supabase
+        .from("partner_checkins")
+        .update({ status: "ready", ready_at: new Date().toISOString() })
+        .eq("id", checkIn.id);
+      if (error) throw error;
+      setCheckIns((prev) => prev.filter((c) => c.id !== checkIn.id));
+      showToast("success", `${checkIn.patient_name} marked as ready.`);
+    } catch (e) {
+      showToast("error", e?.message || "Unable to mark patient ready.");
+    } finally {
+      setCheckInMutatingId(null);
+    }
+  };
+
+  const handlePrintLabel = async (label) => {
+    if (!label?.id) return;
+    setPrintingLabelId(label.id);
+    try {
+      const { error } = await supabase
+        .from("partner_label_queue")
+        .update({ printed_at: new Date().toISOString() })
+        .eq("id", label.id);
+      if (error) throw error;
+      setLabelQueue((prev) => prev.filter((item) => item.id !== label.id));
+      showToast("success", `Label ${label.label_code} marked as printed.`);
+    } catch (e) {
+      showToast("error", e?.message || "Unable to update label status.");
+    } finally {
+      setPrintingLabelId(null);
+    }
+  };
+
+  const closeRestockModal = () => {
+    setRestockOpen(false);
+    setRestockItem("");
+    setRestockQuantity("1");
+    setRestockNotes("");
+    setRestockSubmitting(false);
+  };
+
+  const submitRestockRequest = async (event) => {
+    event.preventDefault();
+    if (!restockItem.trim()) {
+      showToast("error", "Please provide an item name.");
+      return;
+    }
+    setRestockSubmitting(true);
+    try {
+      const quantityValue = Number(restockQuantity);
+      const payload = {
+        item_name: restockItem.trim(),
+        quantity: Number.isFinite(quantityValue) && quantityValue > 0 ? quantityValue : null,
+        notes: restockNotes.trim() || null,
+      };
+      const { error } = await supabase.from("partner_restock_requests").insert([payload]);
+      if (error) throw error;
+      showToast("success", "Restock request submitted.");
+      closeRestockModal();
+    } catch (e) {
+      showToast("error", e?.message || "Unable to submit restock request.");
+      setRestockSubmitting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={gridWrap}>
@@ -137,7 +233,7 @@ export default function PartnerPortal() {
         </section>
       )}
 
-      <section style={{ ...sectionStyle, gridColumn: "1 / -1" }}>
+      <section style={{ ...sectionStyle, gridColumn: "1 / -1", position: "relative" }}>
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={titleStyle}>Day Schedule</h2>
           <span style={muted}>
@@ -183,7 +279,7 @@ export default function PartnerPortal() {
           ) : (
             checkIns.map((item) => (
               <div
-                key={item.patient_name}
+                key={item.id || item.patient_name}
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
@@ -197,7 +293,13 @@ export default function PartnerPortal() {
                   <strong>{item.patient_name}</strong>
                   <div style={muted}>{item.status}</div>
                 </div>
-                <button style={actionBtn}>Mark Ready</button>
+                <button
+                  style={{ ...actionBtn, opacity: checkInMutatingId === item.id ? 0.6 : 1 }}
+                  onClick={() => handleMarkReady(item)}
+                  disabled={checkInMutatingId === item.id}
+                >
+                  {checkInMutatingId === item.id ? "Updating…" : "Mark Ready"}
+                </button>
               </div>
             ))
           )}
@@ -213,7 +315,7 @@ export default function PartnerPortal() {
           ) : (
             labelQueue.map((item) => (
               <div
-                key={item.label_code}
+                key={item.id || item.label_code}
                 style={{
                   display: "flex",
                   flexDirection: "column",
@@ -226,7 +328,13 @@ export default function PartnerPortal() {
                 <strong>{item.label_code}</strong>
                 <span>{item.patient_name}</span>
                 <span style={muted}>{item.request_type}</span>
-                <button style={actionBtn}>Print Label</button>
+                <button
+                  style={{ ...actionBtn, opacity: printingLabelId === item.id ? 0.6 : 1 }}
+                  onClick={() => handlePrintLabel(item)}
+                  disabled={printingLabelId === item.id}
+                >
+                  {printingLabelId === item.id ? "Printing…" : "Print Label"}
+                </button>
               </div>
             ))
           )}
@@ -263,7 +371,9 @@ export default function PartnerPortal() {
             ))
           )}
         </div>
-        <button style={actionBtn}>Create Restock Order</button>
+        <button style={actionBtn} onClick={() => setRestockOpen(true)}>
+          Create Restock Order
+        </button>
       </section>
 
       <section style={sectionStyle}>
@@ -283,8 +393,73 @@ export default function PartnerPortal() {
             <strong>{formatCurrency(earnings.month)}</strong>
           </div>
         </div>
-        <button style={actionBtn}>View Detailed Report</button>
+        <a href="/reports/earnings" style={{ ...actionBtn, textDecoration: "none", display: "inline-block" }}>
+          View Detailed Report
+        </a>
       </section>
+
+      {toast && (
+        <div style={toastToneStyles(toast)}>
+          <span style={{ fontWeight: 600, marginRight: 8 }}>
+            {toast.tone === "success" ? "✅" : "❌"}
+          </span>
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      {restockOpen && (
+        <div style={modalOverlay}>
+          <div style={modalContent}>
+            <h3 style={{ marginTop: 0 }}>New Restock Request</h3>
+            <form onSubmit={submitRestockRequest} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <label style={modalLabel}>
+                Item name
+                <input
+                  type="text"
+                  value={restockItem}
+                  onChange={(e) => setRestockItem(e.target.value)}
+                  style={modalInput}
+                  placeholder="e.g. EpiPens"
+                  disabled={restockSubmitting}
+                  required
+                />
+              </label>
+              <label style={modalLabel}>
+                Quantity needed
+                <input
+                  type="number"
+                  min="1"
+                  value={restockQuantity}
+                  onChange={(e) => setRestockQuantity(e.target.value)}
+                  style={modalInput}
+                  disabled={restockSubmitting}
+                />
+              </label>
+              <label style={modalLabel}>
+                Notes (optional)
+                <textarea
+                  value={restockNotes}
+                  onChange={(e) => setRestockNotes(e.target.value)}
+                  style={{ ...modalInput, minHeight: 80, resize: "vertical" }}
+                  disabled={restockSubmitting}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button type="button" style={secondaryBtn} onClick={closeRestockModal} disabled={restockSubmitting}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{ ...actionBtn, opacity: restockSubmitting ? 0.6 : 1 }}
+                  disabled={restockSubmitting}
+                >
+                  {restockSubmitting ? "Submitting…" : "Submit Request"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -324,3 +499,71 @@ const statRow = {
   borderRadius: 10,
   padding: "10px 12px",
 };
+
+const secondaryBtn = {
+  background: "transparent",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: "8px 12px",
+  fontSize: 13,
+  cursor: "pointer",
+};
+
+const modalOverlay = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20,
+  zIndex: 20,
+};
+
+const modalContent = {
+  background: "var(--card)",
+  borderRadius: 12,
+  padding: 24,
+  maxWidth: 420,
+  width: "100%",
+  boxShadow: "var(--shadow)",
+};
+
+const modalLabel = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 6,
+  fontSize: 13,
+  color: "var(--muted)",
+};
+
+const modalInput = {
+  padding: "8px 10px",
+  borderRadius: 8,
+  border: "1px solid var(--border)",
+  fontSize: 14,
+  color: "inherit",
+  background: "var(--background)",
+};
+
+function toastToneStyles(toast) {
+  return {
+    position: "fixed",
+    bottom: 20,
+    right: 20,
+    background:
+      toast?.tone === "success"
+        ? "rgba(34, 197, 94, 0.1)"
+        : "rgba(239, 68, 68, 0.12)",
+    color: toast?.tone === "success" ? "#15803d" : "#b91c1c",
+    border: `1px solid ${toast?.tone === "success" ? "#86efac" : "#fca5a5"}`,
+    borderRadius: 12,
+    padding: "10px 16px",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    boxShadow: "var(--shadow)",
+    zIndex: 30,
+    maxWidth: 320,
+  };
+}
