@@ -172,7 +172,7 @@ export default function IntakeForm() {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, []);
-  const [test_notes, setTestNotes] = useState("");
+  const [patient_notes, setPatientNotes] = useState("");
 
   // UX
   const [submitting, setSubmitting] = useState(false);
@@ -266,7 +266,7 @@ export default function IntakeForm() {
         has_auto_injector,
         carries_auto_injector,
 
-        test_notes: test_notes || null,
+        patient_notes: patient_notes || null,
       };
 
       // 1) create record first
@@ -340,7 +340,7 @@ export default function IntakeForm() {
       setFoodTriggers([]); setOtherTriggers(""); setBakedEgg(false); setBakedMilk(false);
       setAsthma(""); setEczema(false); setHayFever(false); setOtherConditions("");
       setLastAnti(""); setBB(false); setACE(false); setPregnant(false);
-      setHasAI(false); setCarriesAI(false); setTestNotes("");
+      setHasAI(false); setCarriesAI(false); setPatientNotes("");
       setErrors({});
     } catch (e) {
       console.error(e);
@@ -569,7 +569,7 @@ export default function IntakeForm() {
         return (
           <Page>
             <h2 style={{ marginTop: 0 }}>Review & submit</h2>
-            <Row><Label>Any final notes? (optional)</Label><Textarea value={test_notes} onChange={(e) => setTestNotes(e.target.value)} /></Row>
+            <Row><Label>Any final notes? (optional)</Label><Textarea value={patient_notes} onChange={(e) => setPatientNotes(e.target.value)} /></Row>
             <Row>
               <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input type="checkbox" checked={confirm_submission} onChange={(e) => setConfirmSubmission(e.target.checked)} />
