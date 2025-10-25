@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "./supabaseClient";
 import IntakeForm from "./IntakeForm";
 import Dashboard from "./Dashboard";
+import ClinicianSchedule from "./ClinicianSchedule";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
 import PatientPortal from "./PatientPortal";
@@ -172,7 +173,15 @@ export default function App() {
           <Dashboard
             onOpenAnalytics={() => window.setView("analytics")}
             onOpenPartner={() => window.setView("partner")}
+            onOpenSchedule={() => window.setView("schedule")}
           />
+        ) : (
+          <Login />
+        );
+
+      case "schedule":
+        return authed ? (
+          <ClinicianSchedule onBack={() => window.setView("dashboard")} />
         ) : (
           <Login />
         );
@@ -260,17 +269,28 @@ export default function App() {
           </button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", textAlign: "right" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           {authed && (
-            <span style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-              Signed in as <b>{user.email}</b>
-              {isAdmin ? " • Admin" : ""}
-            </span>
+            <button
+              style={navBtn(view === "schedule")}
+              onClick={() => window.setView("schedule")}
+            >
+              Clinician Schedule
+            </button>
           )}
-        </div>
 
-        {/* Dropdown Navigation */}
-        <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+          <div style={{ display: "flex", flexDirection: "column", textAlign: "right" }}>
+            {authed && (
+              <span style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                Signed in as <b>{user.email}</b>
+                {isAdmin ? " • Admin" : ""}
+              </span>
+            )}
+          </div>
+
+          {/* Dropdown Navigation */}
+          <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+        </div>
       </header>
 
       {/* Main content */}
@@ -359,6 +379,18 @@ function NavMenu({ authed, isAdmin, current }) {
         >
           Dashboard
         </MenuItem>
+
+        {authed && (
+          <MenuItem
+            active={current === "schedule"}
+            onClick={() => {
+              window.setView("schedule");
+              setOpen(false);
+            }}
+          >
+            Clinician Schedule
+          </MenuItem>
+        )}
 
         {authed && (
           <MenuItem
