@@ -491,6 +491,7 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
           onClose={() => setSelected(null)}
           onUpdate={fetchRows}
           notifyStatusUpdated={notifyStatusUpdated}
+          showToast={showToast}
         />
       )}
 
@@ -520,7 +521,7 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
 }
 
 /* ---- Detail Panel ---- */
-function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated }) {
+function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated, showToast }) {
   // notes & status
   const saveNotes = async () => {
     const { error } = await supabase
@@ -608,17 +609,22 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
       alert("Please set start and end.");
       return;
     }
-    const user = (await supabase.auth.getUser()).data.user;
-    const { error } = await supabase.from("appointments").insert([
-      {
-        submission_id: row.id,
-        start_at: new Date(startAt).toISOString(),
-        end_at: new Date(endAt).toISOString(),
-        location: location || null,
-        notes: apptNotes || null,
-        created_by: user?.id ?? null,
-      },
-    ]);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user;
+    const { data: appointment, error } = await supabase
+      .from("appointments")
+      .insert([
+        {
+          submission_id: row.id,
+          start_at: new Date(startAt).toISOString(),
+          end_at: new Date(endAt).toISOString(),
+          location: location || null,
+          notes: apptNotes || null,
+          created_by: user?.id ?? null,
+        },
+      ])
+      .select("id,start_at,end_at,location,notes")
+      .single();
     if (error) {
       alert("Failed to create: " + error.message);
       return;
@@ -626,20 +632,78 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
     setLocation("");
     setApptNotes("");
     fetchAppointments();
+    try {
+      const appointmentPayload =
+        appointment ?? {
+          id: "",
+          start_at: new Date(startAt).toISOString(),
+          end_at: new Date(endAt).toISOString(),
+          location: location || null,
+          notes: apptNotes || null,
+        };
+      const { error: notifyError } = await supabase.functions.invoke("notify-email", {
+        body: {
+          type: "appointment_created",
+          submission: {
+            id: row.id,
+            first_name: row.first_name,
+            surname: row.surname,
+            email: row.email,
+            clinician_email: row.clinician_email,
+          },
+          appointment: appointmentPayload,
+          actorEmail: user?.email ?? null,
+        },
+      });
+      if (notifyError) throw notifyError;
+    } catch (err) {
+      console.error("notify-email appointment_created failed", err);
+      showToast?.("error", "Appointment created, but email notification failed to send.");
+    }
   };
 
   const updateRequestStatus = async (request, status) => {
-    const { error } = await supabase
+    const { error, data: updated } = await supabase
       .from("appointment_requests")
       .update({
         status,
         handled_at: status === "resolved" ? new Date().toISOString() : null,
       })
-      .eq("id", request.id);
+      .eq("id", request.id)
+      .select("id, appointment_id, request_type, message, status, patient_email, handled_at")
+      .single();
     if (error) {
       alert("Failed to update request: " + error.message);
     } else {
       fetchAppointmentRequests();
+      if (!updated) return;
+      const appointment =
+        updated.appointment_id && appointments
+          ? appointments.find((a) => String(a.id) === String(updated.appointment_id)) || null
+          : null;
+      try {
+        const { data: authData } = await supabase.auth.getUser();
+        const actorEmail = authData?.user?.email ?? null;
+        const { error: notifyError } = await supabase.functions.invoke("notify-email", {
+          body: {
+            type: "appointment_request_resolved",
+            submission: {
+              id: row.id,
+              first_name: row.first_name,
+              surname: row.surname,
+              email: row.email,
+              clinician_email: row.clinician_email,
+            },
+            request: updated,
+            appointment,
+            actorEmail,
+          },
+        });
+        if (notifyError) throw notifyError;
+      } catch (err) {
+        console.error("notify-email appointment_request_resolved failed", err);
+        showToast?.("error", "Request updated, but email notification failed to send.");
+      }
     }
   };
 
