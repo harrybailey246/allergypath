@@ -1,6 +1,7 @@
 // src/PatientPortal.js
 import React from "react";
 import { supabase } from "./supabaseClient";
+import { createAppointmentICS } from "./utils/calendar";
 
 export default function PatientPortal() {
   const [user, setUser] = React.useState(null);
@@ -10,6 +11,12 @@ export default function PatientPortal() {
   const [subs, setSubs] = React.useState([]);
   const [appts, setAppts] = React.useState({});
   const [err, setErr] = React.useState("");
+  const [toast, setToast] = React.useState(null);
+  const toastTimeoutRef = React.useRef(null);
+  const [requestingAppt, setRequestingAppt] = React.useState(null);
+  const [requestType, setRequestType] = React.useState("reschedule");
+  const [requestMessage, setRequestMessage] = React.useState("");
+  const [requestSubmitting, setRequestSubmitting] = React.useState(false);
 
   // who am I?
   React.useEffect(() => {
@@ -83,6 +90,22 @@ export default function PatientPortal() {
     loadAppts();
   }, [user?.email, subs]);
 
+  const showToast = React.useCallback((tone, message) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ tone, message });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const sendMagicLink = async (e) => {
     e.preventDefault();
     setErr("");
@@ -107,6 +130,60 @@ export default function PatientPortal() {
     setEmail("");
     setSubs([]);
     setAppts({});
+  };
+
+  const handleAddToCalendar = (appointment, submission) => {
+    try {
+      const { blob, filename } = createAppointmentICS(appointment, submission);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("success", "Calendar event downloaded.");
+    } catch (error) {
+      showToast("error", error?.message || "Unable to prepare calendar event.");
+    }
+  };
+
+  const openRequestForm = (appointmentId) => {
+    setRequestingAppt(appointmentId);
+    setRequestType("reschedule");
+    setRequestMessage("");
+  };
+
+  const closeRequestForm = () => {
+    setRequestingAppt(null);
+    setRequestType("reschedule");
+    setRequestMessage("");
+    setRequestSubmitting(false);
+  };
+
+  const submitRequest = async (submission, appointment) => {
+    if (!user?.email) {
+      showToast("error", "Please sign in again to send a request.");
+      return;
+    }
+    setRequestSubmitting(true);
+    try {
+      const { error } = await supabase.from("appointment_requests").insert([
+        {
+          submission_id: submission.id,
+          appointment_id: appointment.id,
+          patient_email: user.email,
+          request_type: requestType,
+          message: requestMessage.trim() || null,
+        },
+      ]);
+      if (error) throw error;
+      showToast("success", "Request sent to the clinic.");
+      closeRequestForm();
+    } catch (e) {
+      showToast("error", e?.message || "Unable to send request.");
+    } finally {
+      setRequestSubmitting(false);
+    }
   };
 
   const getSignedUrl = async (path) => {
@@ -134,6 +211,14 @@ export default function PatientPortal() {
     return (
       <div style={wrap}>
         <h1 style={{ marginTop: 0 }}>Patient Portal</h1>
+        {toast && (
+          <div style={toastToneStyles(toast)}>
+            <span style={{ fontWeight: 600 }}>
+              {toast.tone === "success" ? "✅" : "❌"}
+            </span>
+            <span>{toast.message}</span>
+          </div>
+        )}
         <Card>
           <p style={{ color: "var(--muted)" }}>
             Enter the email you used on the AllergyPath form and we’ll send you a one-time sign-in link.
@@ -167,6 +252,15 @@ export default function PatientPortal() {
           <button onClick={signOut} style={btn}>Sign out</button>
         </div>
       </div>
+
+      {toast && (
+        <div style={toastToneStyles(toast)}>
+          <span style={{ fontWeight: 600 }}>
+            {toast.tone === "success" ? "✅" : "❌"}
+          </span>
+          <span>{toast.message}</span>
+        </div>
+      )}
 
       {err && <div style={{ color: "var(--danger)", margin: "8px 0" }}>❌ {err}</div>}
 
@@ -225,6 +319,43 @@ export default function PatientPortal() {
                         </div>
                         {a.location && <div style={{ color: "var(--muted)" }}>📍 {a.location}</div>}
                         {a.notes && <div style={{ color: "var(--muted)" }}>🗒 {a.notes}</div>}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                          <button onClick={() => handleAddToCalendar(a, s)} style={btn}>Add to calendar</button>
+                          <button onClick={() => openRequestForm(a.id)} style={btn}>
+                            Request change
+                          </button>
+                        </div>
+                        {requestingAppt === a.id && (
+                          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <label style={{ fontSize: 12, color: "var(--muted)" }}>Request type</label>
+                              <select value={requestType} onChange={(e) => setRequestType(e.target.value)} style={{ ...input }}>
+                                <option value="reschedule">Reschedule</option>
+                                <option value="cancel">Cancel</option>
+                                <option value="other">Other</option>
+                              </select>
+                            </div>
+                            <div style={{ display: "grid", gap: 6 }}>
+                              <label style={{ fontSize: 12, color: "var(--muted)" }}>Notes (optional)</label>
+                              <textarea
+                                value={requestMessage}
+                                onChange={(e) => setRequestMessage(e.target.value)}
+                                placeholder="Let us know what you need"
+                                style={{ ...input, minHeight: 80 }}
+                              />
+                            </div>
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                              <button
+                                onClick={() => submitRequest(s, a)}
+                                style={btn}
+                                disabled={requestSubmitting}
+                              >
+                                {requestSubmitting ? "Sending…" : "Send request"}
+                              </button>
+                              <button onClick={closeRequestForm} style={btn}>Cancel</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -303,6 +434,22 @@ function StatusChip({ value }) {
 }
 function fmt(d) {
   return d.toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function toastToneStyles(toast) {
+  const palette =
+    toast?.tone === "success"
+      ? { background: "#ecfdf5", border: "1px solid #bbf7d0", color: "#047857" }
+      : { background: "#fee2e2", border: "1px solid #fecaca", color: "#b91c1c" };
+  return {
+    ...palette,
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    padding: "10px 12px",
+    borderRadius: 12,
+    fontSize: 14,
+  };
 }
 
 /* ---- styles ---- */
