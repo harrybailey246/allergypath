@@ -1,5 +1,5 @@
 // src/Dashboard.js
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import { createEvent } from "ics";
 import { supabase } from "./supabaseClient";
@@ -25,6 +25,8 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [me, setMe] = useState(null);
+  const [pendingOpenId, setPendingOpenId] = useState(null);
+  const openFetchAttempted = useRef(false);
 
   // Lock background scroll when a patient is open
   useEffect(() => {
@@ -97,10 +99,110 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner }) {
     });
   }, [rows, q]);
 
-  const openDetail = (row) => {
+  const openDetail = useCallback((row) => {
     setSelected(row);
     setNotes(row.clinician_notes || "");
-  };
+  }, []);
+
+  const clearOpenParam = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash || "";
+    let searchChanged = false;
+    let hashChanged = false;
+    if (searchParams.has("open")) {
+      searchParams.delete("open");
+      searchChanged = true;
+    }
+
+    let nextHash = hash;
+    if (hash.includes("?")) {
+      const [hashPath, queryString] = hash.split("?");
+      const hashParams = new URLSearchParams(queryString);
+      if (hashParams.has("open")) {
+        hashParams.delete("open");
+        nextHash = hashParams.toString() ? `${hashPath}?${hashParams.toString()}` : hashPath;
+        hashChanged = true;
+      }
+    }
+
+    if (searchChanged || hashChanged) {
+      const nextSearch = searchParams.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${nextHash}`;
+      window.history.replaceState({}, "", nextUrl);
+    }
+  }, []);
+
+  const parseOpenParam = useCallback(() => {
+    if (typeof window === "undefined") return null;
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const searchOpen = searchParams.get("open");
+    if (searchOpen) return searchOpen;
+
+    const hash = window.location.hash || "";
+    if (!hash.includes("?")) return null;
+    const [, queryString] = hash.split("?");
+    if (!queryString) return null;
+    const hashParams = new URLSearchParams(queryString);
+    return hashParams.get("open");
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleNavigation = () => {
+      const openId = parseOpenParam();
+      if (!openId) return;
+      setPendingOpenId((prev) => (prev === openId ? prev : openId));
+      openFetchAttempted.current = false;
+    };
+
+    handleNavigation();
+    window.addEventListener("hashchange", handleNavigation);
+    window.addEventListener("popstate", handleNavigation);
+    return () => {
+      window.removeEventListener("hashchange", handleNavigation);
+      window.removeEventListener("popstate", handleNavigation);
+    };
+  }, [parseOpenParam]);
+
+  useEffect(() => {
+    if (!pendingOpenId) return;
+
+    const match = rows.find((r) => String(r.id) === String(pendingOpenId));
+    if (match) {
+      openDetail(match);
+      clearOpenParam();
+      setPendingOpenId(null);
+      openFetchAttempted.current = false;
+      return;
+    }
+
+    if (openFetchAttempted.current) return;
+    openFetchAttempted.current = true;
+
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("submissions")
+        .select("*")
+        .eq("id", pendingOpenId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!error && data) {
+        openDetail(data);
+      }
+      clearOpenParam();
+      setPendingOpenId(null);
+      openFetchAttempted.current = false;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pendingOpenId, rows, clearOpenParam, openDetail]);
 
   const updateStatus = async (id, next) => {
     const { error } = await supabase
