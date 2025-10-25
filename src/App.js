@@ -269,17 +269,28 @@ export default function App() {
           </button>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", textAlign: "right" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           {authed && (
-            <span style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-              Signed in as <b>{user.email}</b>
-              {isAdmin ? " • Admin" : ""}
-            </span>
+            <button
+              style={navBtn(view === "schedule")}
+              onClick={() => window.setView("schedule")}
+            >
+              Clinician Schedule
+            </button>
           )}
-        </div>
 
-        {/* Dropdown Navigation */}
-        <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+          <div style={{ display: "flex", flexDirection: "column", textAlign: "right" }}>
+            {authed && (
+              <span style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                Signed in as <b>{user.email}</b>
+                {isAdmin ? " • Admin" : ""}
+              </span>
+            )}
+          </div>
+
+          {/* Dropdown Navigation */}
+          <NavMenu authed={authed} isAdmin={isAdmin} current={view} />
+        </div>
       </header>
 
       {/* Main content */}
