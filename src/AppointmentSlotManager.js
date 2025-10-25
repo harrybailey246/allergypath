@@ -316,8 +316,8 @@ export default function AppointmentSlotManager() {
                 </tr>
               </thead>
               <tbody>
-                {slots.map((slot) => (
-                  <tr key={`${slot.__primaryValue}-${slot.start_at || ""}`}>
+                {slots.map((slot, index) => (
+                  <tr key={buildSlotKey(slot, index)}>
                     <td style={td}>{formatSlotStart(slot.start_at)}</td>
                     <td style={td}>{slot.duration_mins ? `${slot.duration_mins} mins` : "—"}</td>
                     <td style={td}>{slot.location || "—"}</td>
@@ -452,6 +452,22 @@ function renderMoney(cents, amount, currency = "GBP") {
   const normalised = normalizeMoneyValue(cents, amount);
   if (normalised == null) return "—";
   return new Intl.NumberFormat("en-GB", { style: "currency", currency }).format(normalised / 100);
+}
+
+function buildSlotKey(slot, index) {
+  if (!slot) return `slot-${index}`;
+  const primary = slot.__primaryValue ?? slot.__raw?.id ?? slot.id ?? null;
+  const start = slot.start_at ?? null;
+  if (primary && start) {
+    return `${primary}-${start}`;
+  }
+  if (primary) {
+    return String(primary);
+  }
+  if (start) {
+    return `start-${start}`;
+  }
+  return `slot-${index}`;
 }
 
 function normalizeMoneyValue(cents, amount) {
