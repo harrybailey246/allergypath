@@ -177,6 +177,7 @@ export default function IntakeForm() {
   // UX
   const [submitting, setSubmitting] = useState(false);
   const [okMsg, setOkMsg] = useState("");
+  const [warnMsg, setWarnMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
   const [errors, setErrors] = useState({}); // ✅ inline errors per step
 
@@ -232,6 +233,7 @@ export default function IntakeForm() {
 
     setSubmitting(true);
     setOkMsg("");
+    setWarnMsg("");
     setErrMsg("");
     try {
       const payload = {
@@ -269,12 +271,35 @@ export default function IntakeForm() {
         patient_notes: patient_notes || null,
       };
 
+      const trimmedNotes = patient_notes.trim();
+      if (trimmedNotes) {
+        payload.patient_notes = trimmedNotes;
+      }
+
+      let schemaMismatch = false;
+
       // 1) create record first
-      const { data: created, error: insErr } = await supabase
+      const baseInsert = await supabase
         .from("submissions")
         .insert([payload])
         .select("*")
         .single();
+
+      let created = baseInsert.data;
+      let insErr = baseInsert.error;
+
+      if (insErr && /patient_notes/.test(insErr.message || "")) {
+        schemaMismatch = true;
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.patient_notes;
+        const retryInsert = await supabase
+          .from("submissions")
+          .insert([fallbackPayload])
+          .select("*")
+          .single();
+        created = retryInsert.data;
+        insErr = retryInsert.error;
+      }
 
       if (insErr) throw insErr;
       const submissionId = created.id;
@@ -320,16 +345,28 @@ export default function IntakeForm() {
         }
       }
 
-      setOkMsg(
-        uploadErr
-          ? "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them."
-          : "Thanks — your form was submitted successfully."
-      );
-      setErrMsg(
-        uploadErr
-          ? "Your form went through, but some files failed to upload. Please email any important documents to the clinic."
-          : ""
-      );
+      let okMessage = "Thanks — your form was submitted successfully.";
+      let warnMessage = "";
+
+      if (uploadErr && schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files or your final notes. We'll be in touch if we need them.";
+        warnMessage =
+          "Your form went through, but some files and your final notes failed to save. Please email any important information to the clinic.";
+      } else if (uploadErr) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them.";
+        warnMessage =
+          "Your form went through, but some files failed to upload. Please email any important documents to the clinic.";
+      } else if (schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save your final notes just yet. We'll make sure the team receives your submission.";
+        warnMessage =
+          "Your form went through, but the notes field is still updating. Please email any urgent notes to the clinic.";
+      }
+
+      setOkMsg(okMessage);
+      setWarnMsg(warnMessage);
       // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
@@ -596,6 +633,11 @@ export default function IntakeForm() {
       {errMsg && (
         <div style={{ background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "var(--danger)", padding: 10, borderRadius: 8, marginBottom: 10 }}>
           ❌ {errMsg}
+        </div>
+      )}
+      {warnMsg && !errMsg && (
+        <div style={{ background: "rgba(250, 204, 21, 0.12)", border: "1px solid rgba(250, 204, 21, 0.35)", color: "#854d0e", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+          ⚠️ {warnMsg}
         </div>
       )}
       {okMsg && (
