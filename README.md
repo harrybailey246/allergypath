@@ -12,9 +12,30 @@ This project requires Supabase credentials to run locally and in any deployed en
    ```bash
    REACT_APP_SUPABASE_URL="https://your-project-id.supabase.co"
    REACT_APP_SUPABASE_ANON_KEY="your-anon-key"
+   RESEND_API_KEY="your-resend-api-key" # used by the notify-email edge function
    ```
 
 For deployments, make sure the same variables are provided by your hosting provider so the application can reach Supabase.
+Additionally, configure the `RESEND_API_KEY` secret in your Supabase project so the `notify-email` edge function can send emails (see below).
+
+## Email notifications & edge functions
+
+The clinician dashboard and intake form trigger a Supabase Edge Function called `notify-email` whenever submissions are created or their status changes. To deploy and configure the function:
+
+1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli) and authenticate against your project.
+2. Deploy the edge function:
+
+   ```bash
+   supabase functions deploy notify-email
+   ```
+
+3. Provide the Resend API key (used by the function to send emails) to your Supabase project:
+
+   ```bash
+   supabase secrets set RESEND_API_KEY=your-resend-api-key
+   ```
+
+4. When developing locally you can run the function with `supabase functions serve notify-email` to verify email behavior (the `RESEND_API_KEY` from `.env.local` will be used if present).
 
 ## Available Scripts
 
