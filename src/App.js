@@ -9,6 +9,7 @@ import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
 import ThemedPage from "./ThemedPage";
 import PartnerPortal from "./PartnerPortal";
+import BookingRequests from "./BookingRequests";
 
 // Hash-based navigation helper
 window.setView = (view) => {
@@ -180,6 +181,17 @@ export default function App() {
       case "analytics":
         return authed && isAdmin ? (
           <AdminAnalytics onBack={() => window.setView("dashboard")} />
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
+      case "bookingRequests":
+        return authed && isAdmin ? (
+          <ThemedPage title="Booking Requests">
+            <BookingRequests />
+          </ThemedPage>
         ) : authed ? (
           <NoAccess onBack={() => window.setView("dashboard")} />
         ) : (
@@ -369,6 +381,18 @@ function NavMenu({ authed, isAdmin, current }) {
             }}
           >
             Partner Tools
+          </MenuItem>
+        )}
+
+        {authed && isAdmin && (
+          <MenuItem
+            active={current === "bookingRequests"}
+            onClick={() => {
+              window.setView("bookingRequests");
+              setOpen(false);
+            }}
+          >
+            Booking Requests
           </MenuItem>
         )}
 
