@@ -569,15 +569,21 @@ function MenuItem({ children, onClick, active }) {
 
 /* ------------ Styling ------------- */
 const navBtn = (active = false) => ({
-  background: active ? "var(--primary)" : "var(--btnBg)",
+  background: active
+    ? "linear-gradient(135deg, rgba(96,165,250,0.75), rgba(129,140,248,0.68))"
+    : "linear-gradient(135deg, rgba(96,165,250,0.24), rgba(129,140,248,0.18))",
   color: active ? "var(--primaryText)" : "var(--headerText)",
-  border: "1px solid var(--primary)",
-  borderRadius: 6,
-  padding: "6px 10px",
+  border: active
+    ? "1px solid rgba(148, 163, 184, 0.45)"
+    : "1px solid rgba(148, 163, 184, 0.35)",
+  borderRadius: 8,
+  padding: "6px 12px",
   cursor: "pointer",
   fontSize: 14,
-  transition: "background 0.2s, color 0.2s, opacity 0.2s",
-  opacity: active ? 1 : 0.95,
+  transition:
+    "background 0.2s ease, color 0.2s ease, opacity 0.2s ease, transform 0.18s ease, box-shadow 0.18s ease",
+  opacity: active ? 1 : 0.98,
+  boxShadow: active ? "0 14px 28px rgba(8, 15, 35, 0.25)" : "0 10px 20px rgba(15, 23, 42, 0.18)",
 });
 
 const toggleBtn = {
