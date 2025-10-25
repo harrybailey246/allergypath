@@ -122,6 +122,18 @@ export default function BookAndPay() {
     }
 
     setSubmitting(true);
+
+    const paymentLink = selected.payment_link || "";
+    const shouldPreparePaymentWindow =
+      Boolean(paymentLink) && typeof window !== "undefined";
+    let paymentWindow = null;
+    if (shouldPreparePaymentWindow) {
+      paymentWindow = window.open("", "_blank", "noopener,noreferrer");
+    }
+
+    const manualPaymentNotice = paymentLink
+      ? `If your browser blocked the payment tab, open this link in a new tab: ${paymentLink}`
+      : "";
     try {
       const firstName = form.first_name.trim();
       const payload = {
@@ -149,14 +161,25 @@ export default function BookAndPay() {
         .eq("is_booked", false);
 
       setSuccess("Great! We’ve reserved this appointment — complete payment below to confirm.");
-      setPaymentNotice(
-        selected.payment_link
-          ? "Payment opens in a new tab."
-          : "A team member will contact you to take payment."
-      );
 
-      if (selected.payment_link && typeof window !== 'undefined') {
-        window.open(selected.payment_link, "_blank", "noopener,noreferrer");
+      if (paymentLink) {
+        if (paymentWindow && !paymentWindow.closed) {
+          try {
+            paymentWindow.location = paymentLink;
+            setPaymentNotice("Payment opens in a new tab.");
+          } catch (navigationError) {
+            try {
+              paymentWindow.close();
+            } catch (closeError) {
+              // Ignore closing errors; we'll fall back to manual guidance.
+            }
+            setPaymentNotice(manualPaymentNotice);
+          }
+        } else {
+          setPaymentNotice(manualPaymentNotice);
+        }
+      } else {
+        setPaymentNotice("A team member will contact you to take payment.");
       }
 
       setForm(initialForm);
@@ -165,6 +188,16 @@ export default function BookAndPay() {
     } catch (e) {
       console.error(e);
       setError(formatFriendlyError(e));
+      if (paymentWindow && !paymentWindow.closed) {
+        try {
+          paymentWindow.close();
+        } catch (closeError) {
+          // Ignore closing errors.
+        }
+      }
+      if (paymentLink) {
+        setPaymentNotice(manualPaymentNotice);
+      }
     } finally {
       setSubmitting(false);
     }
