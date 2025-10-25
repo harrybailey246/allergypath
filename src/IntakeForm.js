@@ -177,6 +177,7 @@ export default function IntakeForm() {
   // UX
   const [submitting, setSubmitting] = useState(false);
   const [okMsg, setOkMsg] = useState("");
+  const [warnMsg, setWarnMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
   const [errors, setErrors] = useState({}); // ✅ inline errors per step
 
@@ -232,6 +233,7 @@ export default function IntakeForm() {
 
     setSubmitting(true);
     setOkMsg("");
+    setWarnMsg("");
     setErrMsg("");
     try {
       const payload = {
@@ -342,27 +344,27 @@ export default function IntakeForm() {
       }
 
       let okMessage = "Thanks — your form was submitted successfully.";
-      let errMessage = "";
+      let warnMessage = "";
 
       if (uploadErr && schemaMismatch) {
         okMessage =
           "Thanks — your form was submitted, but we couldn't save all of your files or your final notes. We'll be in touch if we need them.";
-        errMessage =
+        warnMessage =
           "Your form went through, but some files and your final notes failed to save. Please email any important information to the clinic.";
       } else if (uploadErr) {
         okMessage =
           "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them.";
-        errMessage =
+        warnMessage =
           "Your form went through, but some files failed to upload. Please email any important documents to the clinic.";
       } else if (schemaMismatch) {
         okMessage =
           "Thanks — your form was submitted, but we couldn't save your final notes just yet. We'll make sure the team receives your submission.";
-        errMessage =
+        warnMessage =
           "Your form went through, but the notes field is still updating. Please email any urgent notes to the clinic.";
       }
 
       setOkMsg(okMessage);
-      setErrMsg(errMessage);
+      setWarnMsg(warnMessage);
       // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
@@ -629,6 +631,11 @@ export default function IntakeForm() {
       {errMsg && (
         <div style={{ background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", color: "var(--danger)", padding: 10, borderRadius: 8, marginBottom: 10 }}>
           ❌ {errMsg}
+        </div>
+      )}
+      {warnMsg && !errMsg && (
+        <div style={{ background: "rgba(250, 204, 21, 0.12)", border: "1px solid rgba(250, 204, 21, 0.35)", color: "#854d0e", padding: 10, borderRadius: 8, marginBottom: 10 }}>
+          ⚠️ {warnMsg}
         </div>
       )}
       {okMsg && (
