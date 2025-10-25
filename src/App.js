@@ -280,18 +280,77 @@ export default function App() {
         style={{
           background: "var(--header)",
           color: "var(--headerText)",
-          padding: "16px 24px",
+          padding: "18px 26px",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           flexWrap: "wrap",
-          gap: 12,
+          gap: 18,
           boxShadow: "0 18px 40px rgba(7, 11, 26, 0.35)",
         }}
       >
         {/* Logo + Theme Toggle */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0, fontSize: 20, letterSpacing: 0.3 }}>AllergyPath</h1>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 18,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              padding: "10px 16px",
+              borderRadius: 16,
+              background: "linear-gradient(135deg, rgba(96,165,250,0.25), rgba(129,140,248,0.18))",
+              border: "1px solid rgba(148, 163, 184, 0.3)",
+              boxShadow: "0 12px 30px rgba(8, 15, 35, 0.28)",
+            }}
+          >
+            <div
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 14,
+                display: "grid",
+                placeItems: "center",
+                background: "rgba(15, 23, 42, 0.65)",
+                color: "#ffffff",
+                fontWeight: 700,
+                fontSize: 20,
+                letterSpacing: 1.2,
+              }}
+            >
+              AP
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span
+                style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  letterSpacing: 0.8,
+                  textTransform: "uppercase",
+                }}
+              >
+                Allergy
+                <span style={{ color: "var(--primary)" }}>Path</span>
+              </span>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: 0.4,
+                  color: "rgba(226, 232, 240, 0.92)",
+                  textTransform: "uppercase",
+                }}
+              >
+                Specialist allergy care, simplified
+              </span>
+            </div>
+          </div>
           <button onClick={toggleTheme} style={toggleBtn}>
             {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
           </button>
