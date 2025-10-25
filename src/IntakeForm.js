@@ -267,6 +267,8 @@ export default function IntakeForm() {
 
         has_auto_injector,
         carries_auto_injector,
+
+        patient_notes: patient_notes || null,
       };
 
       const trimmedNotes = patient_notes.trim();
