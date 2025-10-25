@@ -265,16 +265,37 @@ export default function IntakeForm() {
 
         has_auto_injector,
         carries_auto_injector,
-
-        patient_notes: patient_notes || null,
       };
 
+      const trimmedNotes = patient_notes.trim();
+      if (trimmedNotes) {
+        payload.patient_notes = trimmedNotes;
+      }
+
+      let schemaMismatch = false;
+
       // 1) create record first
-      const { data: created, error: insErr } = await supabase
+      const baseInsert = await supabase
         .from("submissions")
         .insert([payload])
         .select("*")
         .single();
+
+      let created = baseInsert.data;
+      let insErr = baseInsert.error;
+
+      if (insErr && /patient_notes/.test(insErr.message || "")) {
+        schemaMismatch = true;
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.patient_notes;
+        const retryInsert = await supabase
+          .from("submissions")
+          .insert([fallbackPayload])
+          .select("*")
+          .single();
+        created = retryInsert.data;
+        insErr = retryInsert.error;
+      }
 
       if (insErr) throw insErr;
       const submissionId = created.id;
@@ -320,16 +341,28 @@ export default function IntakeForm() {
         }
       }
 
-      setOkMsg(
-        uploadErr
-          ? "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them."
-          : "Thanks — your form was submitted successfully."
-      );
-      setErrMsg(
-        uploadErr
-          ? "Your form went through, but some files failed to upload. Please email any important documents to the clinic."
-          : ""
-      );
+      let okMessage = "Thanks — your form was submitted successfully.";
+      let errMessage = "";
+
+      if (uploadErr && schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files or your final notes. We'll be in touch if we need them.";
+        errMessage =
+          "Your form went through, but some files and your final notes failed to save. Please email any important information to the clinic.";
+      } else if (uploadErr) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save all of your files. We'll be in touch if we need them.";
+        errMessage =
+          "Your form went through, but some files failed to upload. Please email any important documents to the clinic.";
+      } else if (schemaMismatch) {
+        okMessage =
+          "Thanks — your form was submitted, but we couldn't save your final notes just yet. We'll make sure the team receives your submission.";
+        errMessage =
+          "Your form went through, but the notes field is still updating. Please email any urgent notes to the clinic.";
+      }
+
+      setOkMsg(okMessage);
+      setErrMsg(errMessage);
       // reset minimal fields to keep UX tidy
       setStep(1);
       setFiles([]);
