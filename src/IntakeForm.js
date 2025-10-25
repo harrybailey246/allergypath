@@ -1,5 +1,5 @@
 // src/IntakeForm.js
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { uploadAttachment } from "./storage";
 
@@ -158,6 +158,20 @@ export default function IntakeForm() {
 
   // review / submit
   const [confirm_submission, setConfirmSubmission] = useState(false);
+  const [toast, setToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
+
+  const showToast = useCallback((tone, message) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ tone, message });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
   const [test_notes, setTestNotes] = useState("");
 
   // UX
@@ -259,11 +273,12 @@ export default function IntakeForm() {
       const { data: created, error: insErr } = await supabase
         .from("submissions")
         .insert([payload])
-        .select("id")
+        .select("*")
         .single();
 
       if (insErr) throw insErr;
       const submissionId = created.id;
+      let submissionForNotify = created;
 
       // 2) optional upload (avoid “record 'pick' is not assigned yet” by ensuring target id exists first)
       const uploaded = [];
@@ -289,6 +304,19 @@ export default function IntakeForm() {
         if (updateErr) {
           console.error("Failed to link attachments", updateErr);
           uploadErr = uploadErr || updateErr;
+        } else {
+          submissionForNotify = { ...submissionForNotify, attachments: uploaded };
+        }
+      }
+
+      if (submissionForNotify) {
+        try {
+          await supabase.functions.invoke("notify-email", {
+            body: { type: "submission_created", submission: submissionForNotify },
+          });
+        } catch (invokeErr) {
+          console.error("notify-email invocation failed", invokeErr);
+          showToast("error", "Submission saved, but we couldn't send email notifications.");
         }
       }
 
@@ -577,6 +605,28 @@ export default function IntakeForm() {
       )}
 
       {renderStep()}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 24,
+            background: toast.tone === "success" ? "rgba(16, 185, 129, 0.95)" : "rgba(239, 68, 68, 0.95)",
+            color: "white",
+            padding: "10px 14px",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.15)",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            zIndex: 9999,
+          }}
+        >
+          <span>{toast.tone === "success" ? "✅" : "⚠️"}</span>
+          <span>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,40 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
   const [me, setMe] = useState(null);
   const [pendingOpenId, setPendingOpenId] = useState(null);
   const openFetchAttempted = useRef(false);
+  const [toast, setToast] = useState(null);
+  const toastTimeoutRef = useRef(null);
+
+  const showToast = useCallback((tone, message) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setToast({ tone, message });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    };
+  }, []);
+
+  const notifyStatusUpdated = useCallback(
+    async (submission, nextStatus) => {
+      if (!submission) return;
+      try {
+        await supabase.functions.invoke("notify-email", {
+          body: {
+            type: "status_updated",
+            submission,
+            newStatus: nextStatus,
+            actorEmail: me?.email || null,
+          },
+        });
+      } catch (err) {
+        console.error("notify-email invocation failed", err);
+        showToast("error", "Status updated, but email notification failed to send.");
+      }
+    },
+    [me?.email, showToast]
+  );
 
   // Lock background scroll when a patient is open
   useEffect(() => {
@@ -205,39 +239,54 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
   }, [pendingOpenId, rows, clearOpenParam, openDetail]);
 
   const updateStatus = async (id, next) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("submissions")
       .update({ status: next, updated_at: new Date().toISOString() })
-      .eq("id", id);
+      .eq("id", id)
+      .select("*")
+      .single();
     if (error) alert("Failed to update: " + error.message);
-    else fetchRows();
+    else {
+      fetchRows();
+      notifyStatusUpdated(data, data?.status ?? next);
+    }
   };
 
   const assignToMe = async (row) => {
     if (!me) return alert("Please sign in first.");
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("submissions")
       .update({
         clinician_id: me.id,
         clinician_email: me.email || null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .select("*")
+      .single();
     if (error) alert("Assign failed: " + error.message);
-    else fetchRows();
+    else {
+      fetchRows();
+      notifyStatusUpdated(data, data?.status ?? row.status);
+    }
   };
 
   const unassign = async (row) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("submissions")
       .update({
         clinician_id: null,
         clinician_email: null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .select("*")
+      .single();
     if (error) alert("Unassign failed: " + error.message);
-    else fetchRows();
+    else {
+      fetchRows();
+      notifyStatusUpdated(data, data?.status ?? row.status);
+    }
   };
 
   const exportCSV = () => {
@@ -441,14 +490,37 @@ export default function Dashboard({ onOpenAnalytics, onOpenPartner, onOpenSchedu
           setNotes={setNotes}
           onClose={() => setSelected(null)}
           onUpdate={fetchRows}
+          notifyStatusUpdated={notifyStatusUpdated}
         />
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            right: 24,
+            bottom: 24,
+            background: toast.tone === "success" ? "rgba(16, 185, 129, 0.95)" : "rgba(239, 68, 68, 0.95)",
+            color: "white",
+            padding: "10px 14px",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.15)",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            zIndex: 9999,
+          }}
+        >
+          <span>{toast.tone === "success" ? "✅" : "⚠️"}</span>
+          <span>{toast.message}</span>
+        </div>
       )}
     </div>
   );
 }
 
 /* ---- Detail Panel ---- */
-function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
+function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated }) {
   // notes & status
   const saveNotes = async () => {
     const { error } = await supabase
@@ -463,15 +535,20 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate }) {
   };
 
   const updateStatus = async (next) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("submissions")
       .update({
         status: next,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .select("*")
+      .single();
     if (error) alert("Update failed: " + error.message);
-    else onUpdate();
+    else {
+      onUpdate();
+      notifyStatusUpdated(data, data?.status ?? next);
+    }
   };
 
   // scheduling state + loaders
