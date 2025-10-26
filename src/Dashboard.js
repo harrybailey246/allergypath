@@ -3,6 +3,8 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { format } from "date-fns";
 import { supabase } from "./supabaseClient";
 import { createAppointmentICS } from "./utils/calendar";
+import { getSignedUrl } from "./storage";
+import AttachmentRow from "./components/AttachmentRow";
 
 const STATUS_TABS = [
   { key: "all", label: "All" },
@@ -563,6 +565,79 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
     }
   };
 
+  const attachments = React.useMemo(
+    () => (Array.isArray(row.attachments) ? row.attachments.filter(Boolean) : []),
+    [row.attachments]
+  );
+  const [attachmentState, setAttachmentState] = React.useState({});
+  const mountedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    setAttachmentState((prev) => {
+      const next = {};
+      attachments.forEach((path) => {
+        if (prev[path]) next[path] = prev[path];
+      });
+      return next;
+    });
+  }, [attachments]);
+
+  const loadAttachment = React.useCallback(async (path) => {
+    try {
+      const url = await getSignedUrl(path);
+      if (!mountedRef.current) return;
+      setAttachmentState((prev) => ({
+        ...prev,
+        [path]: { url, loading: false, error: null },
+      }));
+    } catch (err) {
+      console.error("attachment download url", err);
+      if (!mountedRef.current) return;
+      setAttachmentState((prev) => ({
+        ...prev,
+        [path]: {
+          url: null,
+          loading: false,
+          error: err?.message ? `Unable to prepare download: ${err.message}` : "Unable to prepare download.",
+        },
+      }));
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (attachments.length === 0) return;
+    const missing = attachments.filter((path) => !attachmentState[path]);
+    if (missing.length === 0) return;
+    missing.forEach((path) => {
+      setAttachmentState((prev) => ({
+        ...prev,
+        [path]: { url: null, loading: true, error: null },
+      }));
+      loadAttachment(path);
+    });
+  }, [attachments, attachmentState, loadAttachment]);
+
+  const retryAttachment = React.useCallback(
+    (path) => {
+      setAttachmentState((prev) => ({
+        ...prev,
+        [path]: { url: prev[path]?.url ?? null, loading: true, error: null },
+      }));
+      loadAttachment(path);
+    },
+    [loadAttachment]
+  );
+
+  const attachmentsLoading = attachments.some((path) => attachmentState[path]?.loading);
+  const attachmentsErrored = attachments.some((path) => attachmentState[path]?.error);
+
   // scheduling state + loaders
   const [appointments, setAppointments] = React.useState([]);
   const [appointmentRequests, setAppointmentRequests] = React.useState([]);
@@ -799,6 +874,34 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
 
       <h4>Flags</h4>
       <p>{Array.isArray(row.flags) ? row.flags.join(" • ") : "—"}</p>
+
+      {attachments.length > 0 && (
+        <>
+          <h4>Attachments</h4>
+          {attachmentsLoading && <p style={{ color: "#6b7280" }}>Preparing attachments…</p>}
+          {attachmentsErrored && (
+            <p style={{ color: "#b91c1c", fontSize: 12 }}>
+              Some attachments couldn’t be prepared. Try again below.
+            </p>
+          )}
+          <div style={{ display: "grid", gap: 6 }}>
+            {attachments.map((path) => {
+              const entry = attachmentState[path] || { url: null, loading: true, error: null };
+              return (
+                <AttachmentRow
+                  key={path}
+                  path={path}
+                  url={entry.url}
+                  loading={entry.loading}
+                  error={entry.error}
+                  onRetry={() => retryAttachment(path)}
+                  buttonStyle={btn}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Notes */}
       <h4>Clinician Notes</h4>

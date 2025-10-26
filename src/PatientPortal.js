@@ -2,6 +2,8 @@
 import React from "react";
 import { supabase } from "./supabaseClient";
 import { createAppointmentICS } from "./utils/calendar";
+import AttachmentRow from "./components/AttachmentRow";
+import { getSignedUrl as getAttachmentSignedUrl } from "./storage";
 
 export default function PatientPortal() {
   const [user, setUser] = React.useState(null);
@@ -186,21 +188,10 @@ export default function PatientPortal() {
     }
   };
 
-  const getSignedUrl = async (path) => {
-    try {
-      // assume attachments[] stores storage object paths, e.g. "attachments/uuid/file.pdf"
-      const bucket = "attachments";
-      const key = path.includes(`${bucket}/`) ? path.split(`${bucket}/`)[1] : path;
-      const { data, error } = await supabase
-        .storage
-        .from(bucket)
-        .createSignedUrl(key, 3600); // 1 hour
-      if (error) throw error;
-      return data.signedUrl;
-    } catch (_e) {
-      return null;
-    }
-  };
+  const getSignedUrl = React.useCallback(async (path) => {
+    if (!path) throw new Error("Missing attachment path");
+    return getAttachmentSignedUrl(path);
+  }, []);
 
   if (loading) {
     return <div style={wrap}><Card><div>Loading…</div></Card></div>;
@@ -301,7 +292,7 @@ export default function PatientPortal() {
                   <div style={{ fontWeight: 600, margin: "6px 0" }}>Files you’ve uploaded</div>
                   <div style={{ display: "grid", gap: 6 }}>
                     {s.attachments.map((p, i) => (
-                      <AttachmentRow key={i} path={p} getSignedUrl={getSignedUrl} />
+                      <PatientAttachmentRow key={i} path={p} getSignedUrl={getSignedUrl} />
                     ))}
                   </div>
                 </div>
@@ -381,37 +372,39 @@ function Row({ label, children }) {
   );
 }
 
-function AttachmentRow({ path, getSignedUrl }) {
+function PatientAttachmentRow({ path, getSignedUrl }) {
   const [url, setUrl] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState(null);
 
-  React.useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const u = await getSignedUrl(path);
-      setUrl(u);
+  const fetchUrl = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const nextUrl = await getSignedUrl(path);
+      setUrl(nextUrl);
+    } catch (err) {
+      console.error("attachment signed url", err);
+      setUrl(null);
+      setError(err?.message ? `Unable to prepare download: ${err.message}` : "Unable to prepare download.");
+    } finally {
       setLoading(false);
-    })();
+    }
   }, [path, getSignedUrl]);
 
-  const name = path.split("/").pop();
+  React.useEffect(() => {
+    fetchUrl();
+  }, [fetchUrl]);
+
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px" }}>
-      <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
-        📎 {name}
-      </div>
-      <div>
-        <a
-          href={url || "#"}
-          target="_blank"
-          rel="noreferrer"
-          onClick={(e) => { if (!url) e.preventDefault(); }}
-          style={{ ...btn, textDecoration: "none" }}
-        >
-          {loading ? "Preparing…" : "Download"}
-        </a>
-      </div>
-    </div>
+    <AttachmentRow
+      path={path}
+      url={url}
+      loading={loading}
+      error={error}
+      onRetry={fetchUrl}
+      buttonStyle={btn}
+    />
   );
 }
 
