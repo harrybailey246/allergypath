@@ -28,6 +28,14 @@ const muted = {
   fontSize: 13,
 };
 
+const refreshIndicatorStyle = {
+  fontSize: 12,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  color: "var(--muted)",
+};
+
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
   minute: "2-digit",
@@ -47,9 +55,11 @@ export default function PartnerPortal() {
   const [earnings, setEarnings] = React.useState({ today: 0, week: 0, month: 0 });
   const [lastRefreshed, setLastRefreshed] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [error, setError] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const toastTimeoutRef = React.useRef(null);
+  const refreshInFlightRef = React.useRef(false);
   const [checkInMutatingId, setCheckInMutatingId] = React.useState(null);
   const [printingLabelId, setPrintingLabelId] = React.useState(null);
   const [restockOpen, setRestockOpen] = React.useState(false);
@@ -58,66 +68,6 @@ export default function PartnerPortal() {
   const [restockNotes, setRestockNotes] = React.useState("");
   const [restockSubmitting, setRestockSubmitting] = React.useState(false);
 
-  const loadData = React.useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [scheduleRes, checkInsRes, labelQueueRes, stockRes, earningsRes] = await Promise.all([
-        supabase
-          .from("partner_today_schedule")
-          .select("id,start_at,patient_name,purpose,location")
-          .order("start_at", { ascending: true }),
-        supabase
-          .from("partner_checkins")
-          .select("id,patient_name,status,arrived_at")
-          .order("arrived_at", { ascending: true }),
-        supabase
-          .from("partner_label_queue")
-          .select("id,label_code,patient_name,request_type,priority,created_at,printed_at")
-          .order("created_at", { ascending: true }),
-        supabase
-          .from("partner_stock_levels")
-          .select("id,item_name,quantity,unit,status,updated_at")
-          .order("item_name", { ascending: true }),
-        supabase.from("partner_earnings_summary").select("scope,amount"),
-      ]);
-
-      if (scheduleRes.error) throw scheduleRes.error;
-      if (checkInsRes.error) throw checkInsRes.error;
-      if (labelQueueRes.error) throw labelQueueRes.error;
-      if (stockRes.error) throw stockRes.error;
-      if (earningsRes.error) throw earningsRes.error;
-
-      const summary = { today: 0, week: 0, month: 0 };
-      (earningsRes.data || []).forEach((row) => {
-        if (!row?.scope) return;
-        const amount = Number(row.amount ?? 0);
-        summary[row.scope] = Number.isFinite(amount) ? amount : 0;
-      });
-
-      setSchedule(scheduleRes.data || []);
-      setCheckIns(checkInsRes.data || []);
-      setLabelQueue(labelQueueRes.data || []);
-      setStock(stockRes.data || []);
-      setEarnings(summary);
-      setLastRefreshed(new Date());
-    } catch (e) {
-      console.error("Failed to load partner tools", e);
-      setError(e.message || "Failed to load partner metrics.");
-      setSchedule([]);
-      setCheckIns([]);
-      setLabelQueue([]);
-      setStock([]);
-      setEarnings({ today: 0, week: 0, month: 0 });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    loadData();
-  }, [loadData]);
-
   const showToast = React.useCallback((tone, message) => {
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
@@ -125,6 +75,95 @@ export default function PartnerPortal() {
     setToast({ tone, message });
     toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
   }, []);
+
+  const loadData = React.useCallback(
+    async ({ background = false } = {}) => {
+      if (refreshInFlightRef.current) return;
+      refreshInFlightRef.current = true;
+
+      if (background) {
+        setIsRefreshing(true);
+      } else {
+        setLoading(true);
+        setError("");
+      }
+
+      try {
+        const [scheduleRes, checkInsRes, labelQueueRes, stockRes, earningsRes] = await Promise.all([
+          supabase
+            .from("partner_today_schedule")
+            .select("id,start_at,patient_name,purpose,location")
+            .order("start_at", { ascending: true }),
+          supabase
+            .from("partner_checkins")
+            .select("id,patient_name,status,arrived_at")
+            .order("arrived_at", { ascending: true }),
+          supabase
+            .from("partner_label_queue")
+            .select("id,label_code,patient_name,request_type,priority,created_at,printed_at")
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("partner_stock_levels")
+            .select("id,item_name,quantity,unit,status,updated_at")
+            .order("item_name", { ascending: true }),
+          supabase.from("partner_earnings_summary").select("scope,amount"),
+        ]);
+
+        if (scheduleRes.error) throw scheduleRes.error;
+        if (checkInsRes.error) throw checkInsRes.error;
+        if (labelQueueRes.error) throw labelQueueRes.error;
+        if (stockRes.error) throw stockRes.error;
+        if (earningsRes.error) throw earningsRes.error;
+
+        const summary = { today: 0, week: 0, month: 0 };
+        (earningsRes.data || []).forEach((row) => {
+          if (!row?.scope) return;
+          const amount = Number(row.amount ?? 0);
+          summary[row.scope] = Number.isFinite(amount) ? amount : 0;
+        });
+
+        setSchedule(scheduleRes.data || []);
+        setCheckIns(checkInsRes.data || []);
+        setLabelQueue(labelQueueRes.data || []);
+        setStock(stockRes.data || []);
+        setEarnings(summary);
+        setLastRefreshed(new Date());
+        setError("");
+      } catch (e) {
+        console.error("Failed to load partner tools", e);
+        const message = e.message || "Failed to load partner metrics.";
+        setError(message);
+        if (!background) {
+          setSchedule([]);
+          setCheckIns([]);
+          setLabelQueue([]);
+          setStock([]);
+          setEarnings({ today: 0, week: 0, month: 0 });
+        } else {
+          showToast("error", message);
+        }
+      } finally {
+        refreshInFlightRef.current = false;
+        if (background) {
+          setIsRefreshing(false);
+        } else {
+          setLoading(false);
+        }
+      }
+    },
+    [showToast]
+  );
+
+  React.useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  React.useEffect(() => {
+    const intervalId = setInterval(() => {
+      loadData({ background: true });
+    }, 60000);
+    return () => clearInterval(intervalId);
+  }, [loadData]);
 
   React.useEffect(() => {
     return () => {
@@ -226,7 +265,7 @@ export default function PartnerPortal() {
           <div style={{ fontWeight: 600 }}>We couldn’t refresh the latest partner metrics.</div>
           <div style={{ color: "var(--muted)" }}>{error}</div>
           <div style={{ marginTop: 12 }}>
-            <button style={actionBtn} onClick={loadData}>
+            <button style={actionBtn} onClick={() => loadData()}>
               Retry
             </button>
           </div>
@@ -236,8 +275,16 @@ export default function PartnerPortal() {
       <section style={{ ...sectionStyle, gridColumn: "1 / -1", position: "relative" }}>
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={titleStyle}>Day Schedule</h2>
-          <span style={muted}>
+          <span
+            style={{
+              ...muted,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
             {lastRefreshed ? `Updated ${formatTime(lastRefreshed)}` : "Awaiting data"}
+            {isRefreshing && <span style={refreshIndicatorStyle}>⏳ Refreshing…</span>}
           </span>
         </header>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
