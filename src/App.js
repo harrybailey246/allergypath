@@ -14,6 +14,11 @@ import PartnerPortal from "./PartnerPortal";
 import BookingRequests from "./BookingRequests";
 
 // Hash-based navigation helper
+const parseHashView = (hash = "") => {
+  const withoutHash = hash.startsWith("#") ? hash.slice(1) : hash;
+  return withoutHash.split("?")[0] || "";
+};
+
 window.setView = (view) => {
   if (typeof window !== "undefined") window.location.hash = "#" + view;
 };
@@ -87,9 +92,10 @@ function applyTheme(name) {
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [view, setLocalView] = useState(
-    (typeof window !== "undefined" && window.location.hash.replace("#", "")) || "intake"
-  );
+  const [view, setLocalView] = useState(() => {
+    if (typeof window === "undefined") return "intake";
+    return parseHashView(window.location.hash) || "intake";
+  });
   const [isAdmin, setIsAdmin] = useState(false);
   const [theme, setTheme] = useState("light");
 
@@ -120,7 +126,8 @@ export default function App() {
     const normalized = viewParam.trim();
     if (!normalized) return;
 
-    setLocalView(normalized);
+    const nextView = parseHashView(normalized) || "intake";
+    setLocalView(nextView);
     window.setView(normalized);
     params.delete("view");
 
@@ -132,8 +139,10 @@ export default function App() {
 
   // Update view when hash changes
   useEffect(() => {
-    const handleHashChange = () =>
-      setLocalView(window.location.hash.replace("#", "") || "intake");
+    const handleHashChange = () => {
+      const nextView = parseHashView(window.location.hash) || "intake";
+      setLocalView(nextView);
+    };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
