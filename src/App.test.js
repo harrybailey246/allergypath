@@ -1,34 +1,14 @@
 import React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
-import App from "./App";
 
-const unsubscribe = jest.fn();
-
-jest.mock("./supabaseClient", () => {
-  const chain = () => ({
-    select: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
-  });
-
-  return {
-    supabase: {
-      auth: {
-        getUser: jest.fn().mockResolvedValue({ data: { user: null } }),
-        onAuthStateChange: jest.fn().mockReturnValue({
-          data: { subscription: { unsubscribe } },
-        }),
-        signOut: jest.fn(),
-      },
-      from: jest.fn().mockImplementation(chain),
-    },
-  };
-});
+jest.mock("./supabaseClient");
 
 jest.mock("./Dashboard", () => ({
   __esModule: true,
   default: () => <div data-testid="dashboard-view">Dashboard mock</div>,
 }));
+
+import App from "./App";
 
 describe("App redirect handling", () => {
   afterEach(() => {

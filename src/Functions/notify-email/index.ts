@@ -2,16 +2,14 @@
 // supabase/functions/notify-email/index.ts
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
+import {
+  buildAppointmentCreatedRecipients,
+  buildStatusUpdatedRecipients,
+  dedupeEmails,
+  type Submission,
+} from "./recipients";
+
 // Define what data looks like
-type Submission = {
-  id: string;
-  created_at?: string;
-  first_name?: string;
-  surname?: string;
-  email?: string;
-  status?: string;
-  clinician_email?: string | null;
-};
 
 // Define the types of messages the function will receive
 type Appointment = {
@@ -67,19 +65,6 @@ async function sendEmail(to: string | string[], subject: string, text: string) {
   return { ok: resp.ok, body: await resp.text() };
 }
 
-function dedupeEmails(emails: (string | null | undefined)[]) {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const email of emails) {
-    if (!email) continue;
-    const lower = email.toLowerCase();
-    if (seen.has(lower)) continue;
-    seen.add(lower);
-    result.push(email);
-  }
-  return result;
-}
-
 function formatDate(value?: string | null) {
   if (!value) return "Unknown";
   try {
@@ -111,7 +96,8 @@ Deno.serve(async (req) => {
     const s = payload.submission;
     const subject = `Status changed: ${s.first_name} ${s.surname}`;
     const text = `The status for ${s.first_name} ${s.surname} is now ${payload.newStatus}.`;
-    await sendEmail([s.clinician_email || "", ...ADMIN_NOTIFY], subject, text);
+    const recipients = buildStatusUpdatedRecipients(s, ADMIN_NOTIFY);
+    await sendEmail(recipients, subject, text);
   }
 
   if (payload.type === "appointment_created") {
@@ -124,7 +110,7 @@ Deno.serve(async (req) => {
     if (appointment.notes) details.push(`Notes: ${appointment.notes}`);
     if (actorEmail) details.push(`Scheduled by: ${actorEmail}`);
     const text = `An appointment has been scheduled for ${s.first_name} ${s.surname}.\n\n${details.join("\n")}\n\nThank you,\nAllergypath Team`;
-    const recipients = dedupeEmails([s.email || null, ...(Array.isArray(ADMIN_NOTIFY) ? ADMIN_NOTIFY : [])]);
+    const recipients = buildAppointmentCreatedRecipients(s, ADMIN_NOTIFY);
     await sendEmail(recipients, subject, text);
   }
 
