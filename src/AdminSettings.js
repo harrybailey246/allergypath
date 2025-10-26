@@ -5,6 +5,7 @@ import { supabase } from "./supabaseClient";
 export default function AdminSettings({ onBack }) {
   const [me, setMe] = React.useState(null);
   const [isAdmin, setIsAdmin] = React.useState(false);
+  const [isCheckingRole, setIsCheckingRole] = React.useState(true);
   const [rows, setRows] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState("");
@@ -14,22 +15,42 @@ export default function AdminSettings({ onBack }) {
 
   // load me + role
   React.useEffect(() => {
+    let isMounted = true;
+
     (async () => {
-      const u = (await supabase.auth.getUser()).data.user;
-      setMe(u || null);
-      if (!u?.email) return setIsAdmin(false);
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!isMounted) return;
 
-      // RLS: non-admins can only read their own row; admins can read all.
-      const email = u.email.trim().toLowerCase();
-      const { data, error } = await supabase
-        .from("clinician_emails")
-        .select("role")
-        .eq("email", email)
-        .maybeSingle();
+        const u = data?.user || null;
+        setMe(u);
+        if (!u?.email) {
+          setIsAdmin(false);
+          return;
+        }
 
-      if (!error && data?.role === "admin") setIsAdmin(true);
-      else setIsAdmin(false);
+        // RLS: non-admins can only read their own row; admins can read all.
+        const email = u.email.trim().toLowerCase();
+        const { data: roleData, error } = await supabase
+          .from("clinician_emails")
+          .select("role")
+          .eq("email", email)
+          .maybeSingle();
+
+        if (!isMounted) return;
+
+        if (!error && roleData?.role === "admin") setIsAdmin(true);
+        else setIsAdmin(false);
+      } catch (e) {
+        if (isMounted) setIsAdmin(false);
+      } finally {
+        if (isMounted) setIsCheckingRole(false);
+      }
     })();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const fetchRows = React.useCallback(async () => {
@@ -98,6 +119,18 @@ export default function AdminSettings({ onBack }) {
   };
 
   // Non-admin guard
+  if (isCheckingRole) {
+    return (
+      <div style={wrap}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+          <h1 style={{ margin: 0 }}>Admin Settings</h1>
+          <button style={btn} onClick={onBack}>← Back</button>
+        </div>
+        <div style={{ color: "#6b7280" }}>Checking permissions…</div>
+      </div>
+    );
+  }
+
   if (!isAdmin) {
     return (
       <div style={wrap}>
