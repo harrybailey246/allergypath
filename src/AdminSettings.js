@@ -20,10 +20,11 @@ export default function AdminSettings({ onBack }) {
       if (!u?.email) return setIsAdmin(false);
 
       // RLS: non-admins can only read their own row; admins can read all.
+      const email = u.email.trim().toLowerCase();
       const { data, error } = await supabase
         .from("clinician_emails")
         .select("role")
-        .eq("email", u.email)
+        .eq("email", email)
         .maybeSingle();
 
       if (!error && data?.role === "admin") setIsAdmin(true);
