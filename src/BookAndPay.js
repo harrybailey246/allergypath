@@ -154,11 +154,22 @@ export default function BookAndPay() {
       }
 
       const slotClient = slotSource.schema ? supabase.schema(slotSource.schema) : supabase;
-      await slotClient
+      const { error: updateError, count: updatedCount } = await slotClient
         .from(slotSource.table)
         .update({ is_booked: true })
         .eq("id", selected.id)
-        .eq("is_booked", false);
+        .eq("is_booked", false)
+        .select("id", { count: "exact", head: true });
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      if (!updatedCount || updatedCount === 0) {
+        throw new Error(
+          "We couldn't reserve this slot. It may have already been booked — please pick another time."
+        );
+      }
 
       setSuccess("Great! We’ve reserved this appointment — complete payment below to confirm.");
 
