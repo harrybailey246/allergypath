@@ -10,6 +10,7 @@ export default function PatientPortal() {
   const [loading, setLoading] = React.useState(true);
   const [subs, setSubs] = React.useState([]);
   const [appts, setAppts] = React.useState({});
+  const [requests, setRequests] = React.useState({});
   const [err, setErr] = React.useState("");
   const [toast, setToast] = React.useState(null);
   const toastTimeoutRef = React.useRef(null);
@@ -17,6 +18,14 @@ export default function PatientPortal() {
   const [requestType, setRequestType] = React.useState("reschedule");
   const [requestMessage, setRequestMessage] = React.useState("");
   const [requestSubmitting, setRequestSubmitting] = React.useState(false);
+
+  const showToast = React.useCallback((tone, message) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToast({ tone, message });
+    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
+  }, []);
 
   // who am I?
   React.useEffect(() => {
@@ -58,6 +67,7 @@ export default function PatientPortal() {
     const loadAppts = async () => {
       if (!user?.email || subs.length === 0) {
         setAppts({});
+        setRequests({});
         return;
       }
 
@@ -90,13 +100,48 @@ export default function PatientPortal() {
     loadAppts();
   }, [user?.email, subs]);
 
-  const showToast = React.useCallback((tone, message) => {
-    if (toastTimeoutRef.current) {
-      clearTimeout(toastTimeoutRef.current);
-    }
-    setToast({ tone, message });
-    toastTimeoutRef.current = setTimeout(() => setToast(null), 4000);
-  }, []);
+  React.useEffect(() => {
+    const loadRequests = async () => {
+      if (!user?.email || subs.length === 0) {
+        setRequests({});
+        return;
+      }
+
+      const submissionIds = subs.map((s) => s.id);
+
+      try {
+        const { data, error } = await supabase
+          .from("appointment_requests")
+          .select(
+            "id, submission_id, appointment_id, request_type, message, status, handled_at, created_at"
+          )
+          .in("submission_id", submissionIds)
+          .eq("patient_email", user.email)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const map = submissionIds.reduce((acc, id) => {
+          acc[id] = [];
+          return acc;
+        }, {});
+
+        (data || []).forEach((request) => {
+          if (!map[request.submission_id]) {
+            map[request.submission_id] = [];
+          }
+          map[request.submission_id].push(request);
+        });
+
+        setRequests(map);
+      } catch (error) {
+        setRequests({});
+        showToast("error", error?.message || "Unable to load requests.");
+      }
+    };
+
+    loadRequests();
+  }, [user?.email, subs, showToast]);
 
   React.useEffect(() => {
     return () => {
@@ -130,6 +175,7 @@ export default function PatientPortal() {
     setEmail("");
     setSubs([]);
     setAppts({});
+    setRequests({});
   };
 
   const handleAddToCalendar = (appointment, submission) => {
@@ -167,16 +213,31 @@ export default function PatientPortal() {
     }
     setRequestSubmitting(true);
     try {
-      const { error } = await supabase.from("appointment_requests").insert([
-        {
-          submission_id: submission.id,
-          appointment_id: appointment.id,
-          patient_email: user.email,
-          request_type: requestType,
-          message: requestMessage.trim() || null,
-        },
-      ]);
+      const { data, error } = await supabase
+        .from("appointment_requests")
+        .insert([
+          {
+            submission_id: submission.id,
+            appointment_id: appointment.id,
+            patient_email: user.email,
+            request_type: requestType,
+            message: requestMessage.trim() || null,
+          },
+        ])
+        .select(
+          "id, submission_id, appointment_id, request_type, message, status, handled_at, created_at"
+        )
+        .single();
       if (error) throw error;
+      if (data) {
+        setRequests((prev) => {
+          const existing = prev[submission.id] || [];
+          return {
+            ...prev,
+            [submission.id]: [data, ...existing],
+          };
+        });
+      }
       showToast("success", "Request sent to the clinic.");
       closeRequestForm();
     } catch (e) {
@@ -312,52 +373,95 @@ export default function PatientPortal() {
                 <div style={{ fontWeight: 600, margin: "6px 0" }}>Appointments</div>
                 {appts[s.id] && appts[s.id].length > 0 ? (
                   <div style={{ display: "grid", gap: 8 }}>
-                    {appts[s.id].map((a) => (
-                      <div key={a.id} style={{ padding: 8, border: "1px solid var(--border)", borderRadius: 8 }}>
-                        <div style={{ fontWeight: 600 }}>
-                          {fmt(new Date(a.start_at))} – {new Date(a.end_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
-                        </div>
-                        {a.location && <div style={{ color: "var(--muted)" }}>📍 {a.location}</div>}
-                        {a.notes && <div style={{ color: "var(--muted)" }}>🗒 {a.notes}</div>}
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                          <button onClick={() => handleAddToCalendar(a, s)} style={btn}>Add to calendar</button>
-                          <button onClick={() => openRequestForm(a.id)} style={btn}>
-                            Request change
-                          </button>
-                        </div>
-                        {requestingAppt === a.id && (
-                          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <label style={{ fontSize: 12, color: "var(--muted)" }}>Request type</label>
-                              <select value={requestType} onChange={(e) => setRequestType(e.target.value)} style={{ ...input }}>
-                                <option value="reschedule">Reschedule</option>
-                                <option value="cancel">Cancel</option>
-                                <option value="other">Other</option>
-                              </select>
-                            </div>
-                            <div style={{ display: "grid", gap: 6 }}>
-                              <label style={{ fontSize: 12, color: "var(--muted)" }}>Notes (optional)</label>
-                              <textarea
-                                value={requestMessage}
-                                onChange={(e) => setRequestMessage(e.target.value)}
-                                placeholder="Let us know what you need"
-                                style={{ ...input, minHeight: 80 }}
-                              />
-                            </div>
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                              <button
-                                onClick={() => submitRequest(s, a)}
-                                style={btn}
-                                disabled={requestSubmitting}
-                              >
-                                {requestSubmitting ? "Sending…" : "Send request"}
-                              </button>
-                              <button onClick={closeRequestForm} style={btn}>Cancel</button>
-                            </div>
+                    {appts[s.id].map((a) => {
+                      const relevantRequests = (requests[s.id] || []).filter(
+                        (r) => r.appointment_id === a.id
+                      );
+                      return (
+                        <div key={a.id} style={{ padding: 8, border: "1px solid var(--border)", borderRadius: 8 }}>
+                          <div style={{ fontWeight: 600 }}>
+                            {fmt(new Date(a.start_at))} – {new Date(a.end_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          {a.location && <div style={{ color: "var(--muted)" }}>📍 {a.location}</div>}
+                          {a.notes && <div style={{ color: "var(--muted)" }}>🗒 {a.notes}</div>}
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+                            <button onClick={() => handleAddToCalendar(a, s)} style={btn}>Add to calendar</button>
+                            <button onClick={() => openRequestForm(a.id)} style={btn}>
+                              Request change
+                            </button>
+                          </div>
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>Requests</div>
+                            {relevantRequests.length ? (
+                              <div style={{ display: "grid", gap: 6 }}>
+                                {relevantRequests.map((r) => (
+                                  <div
+                                    key={r.id}
+                                    style={{
+                                      border: "1px solid var(--border)",
+                                      borderRadius: 8,
+                                      padding: 8,
+                                      background: "var(--card)",
+                                      display: "grid",
+                                      gap: 6,
+                                    }}
+                                  >
+                                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                                      <span style={{ fontWeight: 600, textTransform: "capitalize" }}>{r.request_type}</span>
+                                      <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                                        {new Date(r.created_at).toLocaleString("en-GB")}
+                                      </span>
+                                    </div>
+                                    {r.message && <div>{r.message}</div>}
+                                    <div style={{ color: "var(--muted)", fontSize: 12, display: "grid", gap: 2 }}>
+                                      <span>
+                                        Status: {r.status ? r.status.replace(/_/g, " ") : "Pending"}
+                                      </span>
+                                      <span>
+                                        Handled: {r.handled_at ? new Date(r.handled_at).toLocaleString("en-GB") : "—"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>No requests yet.</div>
+                            )}
+                          </div>
+                          {requestingAppt === a.id && (
+                            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                              <div style={{ display: "grid", gap: 6 }}>
+                                <label style={{ fontSize: 12, color: "var(--muted)" }}>Request type</label>
+                                <select value={requestType} onChange={(e) => setRequestType(e.target.value)} style={{ ...input }}>
+                                  <option value="reschedule">Reschedule</option>
+                                  <option value="cancel">Cancel</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </div>
+                              <div style={{ display: "grid", gap: 6 }}>
+                                <label style={{ fontSize: 12, color: "var(--muted)" }}>Notes (optional)</label>
+                                <textarea
+                                  value={requestMessage}
+                                  onChange={(e) => setRequestMessage(e.target.value)}
+                                  placeholder="Let us know what you need"
+                                  style={{ ...input, minHeight: 80 }}
+                                />
+                              </div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button
+                                  onClick={() => submitRequest(s, a)}
+                                  style={btn}
+                                  disabled={requestSubmitting}
+                                >
+                                  {requestSubmitting ? "Sending…" : "Send request"}
+                                </button>
+                                <button onClick={closeRequestForm} style={btn}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div style={{ color: "var(--muted)" }}>No appointments yet.</div>
