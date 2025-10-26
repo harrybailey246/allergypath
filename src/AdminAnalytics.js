@@ -28,11 +28,11 @@ export default function AdminAnalytics({ onBack }) {
         { data: tat30, error: e6 },
       ] = await Promise.all([
         supabase.from("analytics_status_counts").select("*"),
-        supabase.from("analytics_readiness_risk").select("*").single(),
+        supabase.from("analytics_readiness_risk").select("*").maybeSingle(),
         supabase.from("analytics_weekly").select("*").order("week_start", { ascending: true }),
         supabase.from("analytics_top_triggers").select("*"),
         supabase.from("analytics_top_symptoms").select("*"),
-        supabase.from("analytics_tat_30d").select("*").single(), // ← includes TTFR columns
+        supabase.from("analytics_tat_30d").select("*").maybeSingle(), // ← includes TTFR columns
       ]);
 
       const firstErr = e1 || e2 || e3 || e4 || e5 || e6;
