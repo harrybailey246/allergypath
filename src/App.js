@@ -6,6 +6,7 @@ import Dashboard from "./Dashboard";
 import ClinicianSchedule from "./ClinicianSchedule";
 import Login from "./Login";
 import AdminAnalytics from "./AdminAnalytics";
+import AdminAudit from "./AdminAudit";
 import AdminSettings from "./AdminSettings";
 import PatientPortal from "./PatientPortal";
 import BookAndPay from "./BookAndPay";
@@ -189,6 +190,7 @@ export default function App() {
             onOpenAnalytics={
               isAdmin ? () => window.setView("analytics") : undefined
             }
+            onOpenAudit={isAdmin ? () => window.setView("adminAudit") : undefined}
             onOpenPartner={() => window.setView("partner")}
             onOpenSchedule={() => window.setView("schedule")}
           />
@@ -206,6 +208,15 @@ export default function App() {
       case "analytics":
         return authed && isAdmin ? (
           <AdminAnalytics onBack={() => window.setView("dashboard")} />
+        ) : authed ? (
+          <NoAccess onBack={() => window.setView("dashboard")} />
+        ) : (
+          <Login />
+        );
+
+      case "adminAudit":
+        return authed && isAdmin ? (
+          <AdminAudit onBack={() => window.setView("dashboard")} />
         ) : authed ? (
           <NoAccess onBack={() => window.setView("dashboard")} />
         ) : (
@@ -494,6 +505,12 @@ function NavMenu({ authed, isAdmin, current }) {
           {
             label: "Analytics",
             view: "analytics",
+            requiresAuth: true,
+            requiresAdmin: true,
+          },
+          {
+            label: "Audit & Compliance",
+            view: "adminAudit",
             requiresAuth: true,
             requiresAdmin: true,
           },
