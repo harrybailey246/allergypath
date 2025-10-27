@@ -8,12 +8,16 @@ export default function AdminAnalytics({ onBack }) {
   const [weekly, setWeekly] = React.useState([]);
   const [triggers, setTriggers] = React.useState([]);
   const [symptoms, setSymptoms] = React.useState([]);
+  const [labOrders, setLabOrders] = React.useState([]);
 
   // NEW: TAT / TTFR KPIs from analytics_tat_30d
   const [kpi, setKpi] = React.useState(null);
 
   const [loading, setLoading] = React.useState(true);
   const [err, setErr] = React.useState("");
+
+  const labTatTrend = React.useMemo(() => computeTatTrend(labOrders), [labOrders]);
+  const patientLabHistories = React.useMemo(() => computePatientHistories(labOrders), [labOrders]);
 
   const fetchAll = async () => {
     setErr("");
@@ -26,6 +30,7 @@ export default function AdminAnalytics({ onBack }) {
         { data: tg, error: e4 },
         { data: sy, error: e5 },
         { data: tat30, error: e6 },
+        { data: lab, error: e7 },
       ] = await Promise.all([
         supabase.from("analytics_status_counts").select("*"),
         supabase.from("analytics_readiness_risk").select("*").maybeSingle(),
@@ -33,9 +38,16 @@ export default function AdminAnalytics({ onBack }) {
         supabase.from("analytics_top_triggers").select("*"),
         supabase.from("analytics_top_symptoms").select("*"),
         supabase.from("analytics_tat_30d").select("*").maybeSingle(), // ← includes TTFR columns
+        supabase
+          .from("lab_orders")
+          .select(
+            "id, patient_full_name, patient_email, order_status, ordered_at, result_received_at, result_reviewed_at, vendor, external_order_id"
+          )
+          .order("ordered_at", { ascending: false })
+          .limit(200),
       ]);
 
-      const firstErr = e1 || e2 || e3 || e4 || e5 || e6;
+      const firstErr = e1 || e2 || e3 || e4 || e5 || e6 || e7;
       if (firstErr) throw new Error(firstErr.message || "Failed to load analytics");
 
       setStatusCounts(sc || []);
@@ -44,6 +56,7 @@ export default function AdminAnalytics({ onBack }) {
       setTriggers(tg || []);
       setSymptoms(sy || []);
       setKpi(tat30 || null);
+      setLabOrders(lab || []);
     } catch (e) {
       setErr(e.message || "Failed to load analytics");
     } finally {
@@ -59,6 +72,7 @@ export default function AdminAnalytics({ onBack }) {
   const maxWeekly = weekly.reduce((m, r) => Math.max(m, r.count || 0), 0);
   const maxTriggers = triggers.reduce((m, r) => Math.max(m, r.count || 0), 0);
   const maxSymptoms = symptoms.reduce((m, r) => Math.max(m, r.count || 0), 0);
+  const maxTatP90 = labTatTrend.reduce((m, r) => Math.max(m, r.p90Minutes || 0), 0);
 
   return (
     <div style={wrap}>
@@ -115,6 +129,84 @@ export default function AdminAnalytics({ onBack }) {
           </div>
         ) : (
           <div style={{ color: "#6b7280" }}>No KPI data.</div>
+        )}
+      </Card>
+
+      {/* Lab turnaround trend */}
+      <Card title="Lab turnaround (last 8 weeks)" style={{ marginTop: 12 }}>
+        {labTatTrend.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No lab turnaround data yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {labTatTrend.map((row) => {
+              const pct = maxTatP90 ? Math.min(100, (row.p90Minutes / maxTatP90) * 100) : 0;
+              return (
+                <div
+                  key={row.weekLabel}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "120px 1fr auto auto auto auto",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{row.weekLabel}</div>
+                  <div style={{ height: 10, background: "#f3f4f6", borderRadius: 999 }}>
+                    <div style={{ height: 10, width: `${pct}%`, background: "#111827", borderRadius: 999 }} />
+                  </div>
+                  <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                    Avg {humanizeMinutes(row.avgMinutes)}
+                  </div>
+                  <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                    P50 {humanizeMinutes(row.medianMinutes)}
+                  </div>
+                  <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums" }}>
+                    P90 {humanizeMinutes(row.p90Minutes)}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{row.count} orders</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* Patient lab history */}
+      <Card title="Patient lab history highlights" style={{ marginTop: 12 }}>
+        {patientLabHistories.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No lab orders recorded for patients.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {patientLabHistories.map((history) => (
+              <div
+                key={history.patient}
+                style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, background: "#fff" }}
+              >
+                <div style={{ fontWeight: 600 }}>{history.patient}</div>
+                <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                  {history.timeline.map((entry) => (
+                    <div
+                      key={entry.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "120px auto auto",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ fontSize: 12, color: "#6b7280" }}>{entry.label}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, textTransform: "capitalize" }}>{entry.status}</div>
+                      <div style={{ fontSize: 12, color: entry.tatMinutes != null ? "#059669" : "#b45309" }}>
+                        {entry.tatMinutes != null
+                          ? `TAT ${humanizeMinutes(entry.tatMinutes)}`
+                          : "Awaiting results"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
 
@@ -190,6 +282,119 @@ export default function AdminAnalytics({ onBack }) {
 }
 
 /* ---------- helpers & tiny UI bits ---------- */
+function computeTatTrend(orders) {
+  if (!Array.isArray(orders)) return [];
+  const buckets = new Map();
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setUTCDate(cutoff.getUTCDate() - 56);
+
+  for (const order of orders) {
+    if (!order?.ordered_at || !order?.result_received_at) continue;
+    const orderedAt = new Date(order.ordered_at);
+    const resultAt = new Date(order.result_received_at);
+    if (Number.isNaN(orderedAt.valueOf()) || Number.isNaN(resultAt.valueOf())) continue;
+    if (orderedAt < cutoff || orderedAt > now) continue;
+    if (resultAt < orderedAt) continue;
+
+    const durationMinutes = (resultAt.valueOf() - orderedAt.valueOf()) / 60000;
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) continue;
+
+    const start = startOfWeekUtc(orderedAt);
+    const key = start.toISOString();
+    const bucket = buckets.get(key) || { weekStart: start, durations: [] };
+    bucket.durations.push(durationMinutes);
+    buckets.set(key, bucket);
+  }
+
+  return Array.from(buckets.values())
+    .sort((a, b) => a.weekStart - b.weekStart)
+    .slice(-8)
+    .map((bucket) => {
+      const durations = bucket.durations.slice().sort((a, b) => a - b);
+      return {
+        weekStart: bucket.weekStart,
+        weekLabel: `w/c ${bucket.weekStart.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`,
+        count: durations.length,
+        avgMinutes: average(durations),
+        medianMinutes: medianFromSorted(durations),
+        p90Minutes: percentileFromSorted(durations, 0.9),
+      };
+    });
+}
+
+function computePatientHistories(orders, limit = 5) {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  const map = new Map();
+  for (const order of orders) {
+    const key = order?.patient_full_name || order?.patient_email || "Unknown patient";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(order);
+  }
+
+  const histories = [];
+  for (const [patient, items] of map.entries()) {
+    const sorted = items
+      .slice()
+      .sort((a, b) => new Date(b.ordered_at || 0).valueOf() - new Date(a.ordered_at || 0).valueOf());
+    if (sorted.length === 0) continue;
+    const timeline = sorted.slice(0, 4).map((order) => {
+      const orderedAt = order.ordered_at ? new Date(order.ordered_at) : null;
+      const orderedLabel = orderedAt && Number.isFinite(orderedAt.valueOf())
+        ? orderedAt.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+        : "Unknown date";
+      const resultAt = order.result_received_at ? new Date(order.result_received_at) : null;
+      const tatMinutes = orderedAt && resultAt ? Math.round((resultAt.valueOf() - orderedAt.valueOf()) / 60000) : null;
+      const vendorTag = order.vendor ? ` • ${order.vendor}` : "";
+      return {
+        id: order.id,
+        label: `${orderedLabel}${vendorTag}`,
+        status: (order.order_status || "unknown").replace(/_/g, " "),
+        tatMinutes,
+      };
+    });
+
+    histories.push({
+      patient,
+      timeline,
+      lastOrderedAt: sorted[0]?.ordered_at || null,
+    });
+  }
+
+  return histories
+    .sort((a, b) => new Date(b.lastOrderedAt || 0).valueOf() - new Date(a.lastOrderedAt || 0).valueOf())
+    .slice(0, limit);
+}
+
+function startOfWeekUtc(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7; // convert Sunday=0 to Monday=0
+  d.setUTCDate(d.getUTCDate() - diff);
+  return d;
+}
+
+function average(values) {
+  if (!values.length) return 0;
+  const sum = values.reduce((acc, val) => acc + val, 0);
+  return sum / values.length;
+}
+
+function medianFromSorted(values) {
+  if (!values.length) return 0;
+  const mid = Math.floor(values.length / 2);
+  if (values.length % 2 === 0) {
+    return (values[mid - 1] + values[mid]) / 2;
+  }
+  return values[mid];
+}
+
+function percentileFromSorted(values, percentile) {
+  if (!values.length) return 0;
+  const idx = Math.min(values.length - 1, Math.max(0, Math.round(percentile * (values.length - 1))));
+  return values[idx];
+}
+
 function humanizeMinutes(m) {
   if (m == null || isNaN(m)) return "—";
   if (m < 1) return `${Math.round(m * 60)}s`;
