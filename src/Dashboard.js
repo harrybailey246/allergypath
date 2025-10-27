@@ -33,7 +33,8 @@ export default function Dashboard({
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [me, setMe] = useState(null);
-  const [pendingOpenId, setPendingOpenId] = useState(null);
+  const [pendingOpen, setPendingOpen] = useState(null);
+  const [detailAction, setDetailAction] = useState(null);
   const openFetchAttempted = useRef(false);
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
@@ -141,9 +142,10 @@ export default function Dashboard({
     });
   }, [rows, q]);
 
-  const openDetail = useCallback((row) => {
+  const openDetail = useCallback((row, action = null) => {
     setSelected(row);
     setNotes(row.clinician_notes || "");
+    setDetailAction(action);
   }, []);
 
   const clearOpenParam = useCallback(() => {
@@ -157,6 +159,10 @@ export default function Dashboard({
       searchParams.delete("open");
       searchChanged = true;
     }
+    if (searchParams.has("action")) {
+      searchParams.delete("action");
+      searchChanged = true;
+    }
 
     let nextHash = hash;
     if (hash.includes("?")) {
@@ -164,9 +170,13 @@ export default function Dashboard({
       const hashParams = new URLSearchParams(queryString);
       if (hashParams.has("open")) {
         hashParams.delete("open");
-        nextHash = hashParams.toString() ? `${hashPath}?${hashParams.toString()}` : hashPath;
         hashChanged = true;
       }
+      if (hashParams.has("action")) {
+        hashParams.delete("action");
+        hashChanged = true;
+      }
+      nextHash = hashParams.toString() ? `${hashPath}?${hashParams.toString()}` : hashPath;
     }
 
     if (searchChanged || hashChanged) {
@@ -181,23 +191,29 @@ export default function Dashboard({
 
     const searchParams = new URLSearchParams(window.location.search);
     const searchOpen = searchParams.get("open");
-    if (searchOpen) return searchOpen;
+    const searchAction = searchParams.get("action");
+    if (searchOpen) return { id: searchOpen, action: searchAction };
 
     const hash = window.location.hash || "";
     if (!hash.includes("?")) return null;
     const [, queryString] = hash.split("?");
     if (!queryString) return null;
     const hashParams = new URLSearchParams(queryString);
-    return hashParams.get("open");
+    const hashOpen = hashParams.get("open");
+    if (!hashOpen) return null;
+    return { id: hashOpen, action: hashParams.get("action") };
   }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handleNavigation = () => {
-      const openId = parseOpenParam();
-      if (!openId) return;
-      setPendingOpenId((prev) => (prev === openId ? prev : openId));
+      const target = parseOpenParam();
+      if (!target) return;
+      setPendingOpen((prev) => {
+        if (prev?.id === target.id && prev?.action === target.action) return prev;
+        return target;
+      });
       openFetchAttempted.current = false;
     };
 
@@ -211,13 +227,13 @@ export default function Dashboard({
   }, [parseOpenParam]);
 
   useEffect(() => {
-    if (!pendingOpenId) return;
+    if (!pendingOpen) return;
 
-    const match = rows.find((r) => String(r.id) === String(pendingOpenId));
+    const match = rows.find((r) => String(r.id) === String(pendingOpen.id));
     if (match) {
-      openDetail(match);
+      openDetail(match, pendingOpen.action || null);
       clearOpenParam();
-      setPendingOpenId(null);
+      setPendingOpen(null);
       openFetchAttempted.current = false;
       return;
     }
@@ -230,21 +246,21 @@ export default function Dashboard({
       const { data, error } = await supabase
         .from("submissions")
         .select("*")
-        .eq("id", pendingOpenId)
+        .eq("id", pendingOpen.id)
         .maybeSingle();
       if (cancelled) return;
       if (!error && data) {
-        openDetail(data);
+        openDetail(data, pendingOpen.action || null);
       }
       clearOpenParam();
-      setPendingOpenId(null);
+      setPendingOpen(null);
       openFetchAttempted.current = false;
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [pendingOpenId, rows, clearOpenParam, openDetail]);
+  }, [pendingOpen, rows, clearOpenParam, openDetail]);
 
   const updateStatus = async (id, next) => {
     const { data, error } = await supabase
@@ -501,10 +517,14 @@ export default function Dashboard({
           row={selected}
           notes={notes}
           setNotes={setNotes}
-          onClose={() => setSelected(null)}
+          onClose={() => {
+            setSelected(null);
+            setDetailAction(null);
+          }}
           onUpdate={fetchRows}
           notifyStatusUpdated={notifyStatusUpdated}
           showToast={showToast}
+          initialAction={detailAction}
         />
       )}
 
@@ -534,7 +554,7 @@ export default function Dashboard({
 }
 
 /* ---- Detail Panel ---- */
-function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated, showToast }) {
+function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated, showToast, initialAction }) {
   // notes & status
   const saveNotes = async () => {
     const { error } = await supabase
@@ -645,6 +665,103 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   const [endAt, setEndAt] = React.useState("");
   const [location, setLocation] = React.useState("");
   const [apptNotes, setApptNotes] = React.useState("");
+
+  const nextRecommendation = planSnapshot?.next_recommendation || null;
+
+  const openDoseEditor = React.useCallback(
+    (dose) => {
+      setActiveDoseId(dose.id || null);
+      hydrateDoseForm(dose);
+    },
+    [hydrateDoseForm]
+  );
+
+  const handleDoseFieldChange = (field) => (event) => {
+    const value = event.target.value;
+    setDoseForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const clearDoseForm = React.useCallback(() => {
+    setActiveDoseId(null);
+    hydrateDoseForm(null);
+  }, [hydrateDoseForm]);
+
+  const saveDoseAdjustment = React.useCallback(async () => {
+    if (!activeDoseId) {
+      showToast?.("error", "Select a dose to update.");
+      return;
+    }
+
+    let plannedValue = null;
+    let administeredValue = null;
+    if (doseForm.plannedDose.trim() !== "") {
+      plannedValue = Number(doseForm.plannedDose);
+      if (Number.isNaN(plannedValue)) {
+        showToast?.("error", "Planned dose must be numeric.");
+        return;
+      }
+    }
+    if (doseForm.administeredDose.trim() !== "") {
+      administeredValue = Number(doseForm.administeredDose);
+      if (Number.isNaN(administeredValue)) {
+        showToast?.("error", "Administered dose must be numeric.");
+        return;
+      }
+    }
+
+    setDoseSaving(true);
+    try {
+      const payload = {
+        planned_dose: plannedValue,
+        administered_dose: administeredValue,
+        scheduled_at: doseForm.scheduledAt ? new Date(doseForm.scheduledAt).toISOString() : null,
+        administered_at: doseForm.administeredAt ? new Date(doseForm.administeredAt).toISOString() : null,
+        lot_number: doseForm.lotNumber || null,
+        lot_expiration_date: doseForm.lotExpiry || null,
+      };
+      const { error } = await supabase
+        .from("immunotherapy_doses")
+        .update(payload)
+        .eq("id", activeDoseId);
+      if (error) throw error;
+      showToast?.("success", "Dose updated");
+      await fetchPlan();
+    } catch (err) {
+      console.error("update dose", err);
+      showToast?.("error", err instanceof Error ? err.message : "Failed to update dose");
+    } finally {
+      setDoseSaving(false);
+    }
+  }, [activeDoseId, doseForm, showToast, fetchPlan]);
+
+  const applyRecommendation = React.useCallback(() => {
+    if (!nextRecommendation) return;
+    const nextId = nextRecommendation.dose_id || null;
+    setActiveDoseId(nextId);
+    const target = Array.isArray(planSnapshot?.doses)
+      ? planSnapshot.doses.find((dose) => dose.id === nextId) || nextRecommendation
+      : nextRecommendation;
+    hydrateDoseForm(target);
+    if (nextRecommendation.scheduled_at) {
+      setStartAt(toLocalDateTimeInput(nextRecommendation.scheduled_at));
+    }
+    showToast?.("success", "Applied next dose recommendation.");
+  }, [nextRecommendation, planSnapshot, hydrateDoseForm, showToast, toLocalDateTimeInput]);
+
+  React.useEffect(() => {
+    if (!initialAction) return;
+    if (initialAction === "adjust-dose" && nextRecommendation) {
+      const nextId = nextRecommendation.dose_id || null;
+      setActiveDoseId(nextId);
+      const target = Array.isArray(planSnapshot?.doses)
+        ? planSnapshot.doses.find((dose) => dose.id === nextId) || nextRecommendation
+        : nextRecommendation;
+      hydrateDoseForm(target);
+    }
+    if (initialAction === "reschedule" && nextRecommendation?.scheduled_at) {
+      setStartAt(toLocalDateTimeInput(nextRecommendation.scheduled_at));
+    }
+  }, [initialAction, nextRecommendation, planSnapshot, hydrateDoseForm, toLocalDateTimeInput]);
 
   const fetchAppointments = useCallback(async () => {
     const { data, error } = await supabase
@@ -852,6 +969,9 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
     fetchComments();
   };
 
+  const planDetails = planSnapshot?.plan || null;
+  const planDoses = Array.isArray(planSnapshot?.doses) ? planSnapshot.doses : [];
+
   return (
     <div style={panel}>
       {/* Header */}
@@ -901,6 +1021,187 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
             })}
           </div>
         </>
+      )}
+
+      <h4 style={{ marginTop: 16 }}>Immunotherapy plan</h4>
+      {planLoading ? (
+        <div style={{ color: "#6b7280" }}>Loading immunotherapy plan…</div>
+      ) : planError ? (
+        <div style={{ color: "#b91c1c", border: "1px solid #fecaca", background: "#fee2e2", padding: 10, borderRadius: 8 }}>
+          {planError}
+        </div>
+      ) : planDetails ? (
+        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>{planDetails.regimen_stage}</div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>Status: {planDetails.status}</div>
+            </div>
+            <div style={{ fontSize: 12, color: "#475569" }}>
+              Progress: {planDetails.completed_doses ?? 0}/{planDetails.planned_total_doses ?? "—"}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            Allowed gap: {planDetails.allowed_gap_days ?? "—"} days
+            {planDetails.recommended_gap_action && (
+              <>
+                {" • "}
+                {planDetails.recommended_gap_action}
+              </>
+            )}
+          </div>
+          {planSnapshot?.overdue_count > 0 && (
+            <div style={{ color: "#b91c1c", fontSize: 12 }}>
+              ⚠️ {planSnapshot.overdue_count} dose{planSnapshot.overdue_count === 1 ? "" : "s"} overdue
+            </div>
+          )}
+          {nextRecommendation && (
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 10, display: "grid", gap: 6 }}>
+              <div style={{ fontWeight: 600 }}>Next dose #{nextRecommendation.dose_number}</div>
+              <div style={{ fontSize: 12, color: "#475569" }}>
+                {nextRecommendation.scheduled_at
+                  ? `Scheduled ${new Date(nextRecommendation.scheduled_at).toLocaleString("en-GB")}`
+                  : "Scheduling pending"}
+              </div>
+              {nextRecommendation.gap_flag && (
+                <div style={{ color: "#b91c1c", fontSize: 12 }}>
+                  🚨 Gap flagged ({nextRecommendation.gap_days ?? "?"} days)
+                </div>
+              )}
+              <div>{nextRecommendation.recommendation}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={applyRecommendation} style={btn}>Apply recommendation</button>
+              </div>
+            </div>
+          )}
+          <div>
+            <h5 style={{ margin: "4px 0" }}>Recorded doses</h5>
+            {planDoses.length === 0 ? (
+              <div style={{ color: "#6b7280", fontSize: 12 }}>No doses tracked yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {planDoses.map((dose) => (
+                  <div
+                    key={dose.id}
+                    style={{
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 10,
+                      padding: 10,
+                      background: activeDoseId === dose.id ? "#f0f9ff" : "white",
+                      display: "grid",
+                      gap: 4,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontWeight: 600 }}>Dose #{dose.dose_number}</div>
+                      <button style={{ ...btn, padding: "4px 8px", fontSize: 12 }} onClick={() => openDoseEditor(dose)}>
+                        Edit
+                      </button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#475569" }}>
+                      Planned: {dose.planned_dose ?? "—"}
+                      {dose.planned_dose_unit ? ` ${dose.planned_dose_unit}` : ""}
+                      {dose.scheduled_at && (
+                        <>
+                          {" • "}
+                          Scheduled {new Date(dose.scheduled_at).toLocaleString("en-GB")}
+                        </>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#475569" }}>
+                      Administered: {dose.administered_dose ?? "—"}
+                      {dose.administered_dose_unit ? ` ${dose.administered_dose_unit}` : ""}
+                      {dose.administered_at && (
+                        <>
+                          {" • "}
+                          {new Date(dose.administered_at).toLocaleString("en-GB")}
+                        </>
+                      )}
+                    </div>
+                    {dose.gap_flag && (
+                      <div style={{ color: "#b91c1c", fontSize: 12 }}>
+                        ⚠️ Gap {dose.gap_days ?? "?"} days – {dose.recommendation || "Review protocol."}
+                      </div>
+                    )}
+                    {dose.lot_number && (
+                      <div style={{ fontSize: 12, color: "#475569" }}>
+                        Lot {dose.lot_number}
+                        {dose.lot_expiration_date && ` (exp. ${dose.lot_expiration_date})`}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <h5 style={{ margin: "4px 0" }}>Dose adjustments</h5>
+            {activeDoseId ? (
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+                  <div>
+                    <Label>Scheduled</Label>
+                    <input
+                      type="datetime-local"
+                      value={doseForm.scheduledAt}
+                      onChange={handleDoseFieldChange("scheduledAt")}
+                      style={input}
+                    />
+                  </div>
+                  <div>
+                    <Label>Administered at</Label>
+                    <input
+                      type="datetime-local"
+                      value={doseForm.administeredAt}
+                      onChange={handleDoseFieldChange("administeredAt")}
+                      style={input}
+                    />
+                  </div>
+                  <div>
+                    <Label>Planned dose</Label>
+                    <input
+                      value={doseForm.plannedDose}
+                      onChange={handleDoseFieldChange("plannedDose")}
+                      placeholder="e.g. 0.5"
+                      style={input}
+                    />
+                  </div>
+                  <div>
+                    <Label>Administered dose</Label>
+                    <input
+                      value={doseForm.administeredDose}
+                      onChange={handleDoseFieldChange("administeredDose")}
+                      placeholder="e.g. 0.4"
+                      style={input}
+                    />
+                  </div>
+                  <div>
+                    <Label>Lot number</Label>
+                    <input value={doseForm.lotNumber} onChange={handleDoseFieldChange("lotNumber")} style={input} />
+                  </div>
+                  <div>
+                    <Label>Lot expiry</Label>
+                    <input type="date" value={doseForm.lotExpiry} onChange={handleDoseFieldChange("lotExpiry")} style={input} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    onClick={saveDoseAdjustment}
+                    style={{ ...btn, opacity: doseSaving ? 0.7 : 1 }}
+                    disabled={doseSaving}
+                  >
+                    {doseSaving ? "Saving…" : "Save adjustments"}
+                  </button>
+                  <button onClick={clearDoseForm} style={btn}>Clear</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ color: "#6b7280", fontSize: 12 }}>Select a dose above to edit dosing details.</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{ color: "#6b7280" }}>No immunotherapy plan linked yet.</div>
       )}
 
       {/* Notes */}
@@ -1116,3 +1417,111 @@ const panel = {
 function safe(v) { return (v ?? "").toString(); }
 function arr(a) { return Array.isArray(a) ? a.join("|") : safe(a); }
 function csvEscape(s) { return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  const [planSnapshot, setPlanSnapshot] = React.useState(null);
+  const [planLoading, setPlanLoading] = React.useState(false);
+  const [planError, setPlanError] = React.useState(null);
+  const [activeDoseId, setActiveDoseId] = React.useState(null);
+  const [doseForm, setDoseForm] = React.useState({
+    scheduledAt: "",
+    administeredAt: "",
+    plannedDose: "",
+    administeredDose: "",
+    lotNumber: "",
+    lotExpiry: "",
+  });
+  const [doseSaving, setDoseSaving] = React.useState(false);
+
+  const toLocalDateTimeInput = React.useCallback((value) => {
+    if (!value) return "";
+    try {
+      return format(new Date(value), "yyyy-MM-dd'T'HH:mm");
+    } catch (err) {
+      return "";
+    }
+  }, []);
+
+  const hydrateDoseForm = React.useCallback(
+    (dose) => {
+      if (!dose) {
+        setDoseForm({
+          scheduledAt: "",
+          administeredAt: "",
+          plannedDose: "",
+          administeredDose: "",
+          lotNumber: "",
+          lotExpiry: "",
+        });
+        return;
+      }
+      setDoseForm({
+        scheduledAt: toLocalDateTimeInput(dose.scheduled_at),
+        administeredAt: toLocalDateTimeInput(dose.administered_at),
+        plannedDose: dose.planned_dose !== null && dose.planned_dose !== undefined ? String(dose.planned_dose) : "",
+        administeredDose:
+          dose.administered_dose !== null && dose.administered_dose !== undefined
+            ? String(dose.administered_dose)
+            : "",
+        lotNumber: dose.lot_number || "",
+        lotExpiry: dose.lot_expiration_date || "",
+      });
+    },
+    [toLocalDateTimeInput]
+  );
+
+  const fetchPlan = React.useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const { data, error } = await supabase.rpc("immunotherapy_plan_snapshot", { submission_id: row.id });
+      if (error) throw error;
+      setPlanSnapshot(data);
+      if (!data) {
+        setActiveDoseId(null);
+        hydrateDoseForm(null);
+        return;
+      }
+      if (data?.next_recommendation) {
+        const nextId = data.next_recommendation.dose_id || null;
+        setActiveDoseId((prev) => (prev === null ? nextId : prev));
+        const target = Array.isArray(data?.doses)
+          ? data.doses.find((dose) => dose.id === nextId) || data.next_recommendation
+          : data.next_recommendation;
+        if (activeDoseId === null || activeDoseId === nextId) {
+          hydrateDoseForm(target);
+        }
+      } else if (activeDoseId === null) {
+        hydrateDoseForm(null);
+      }
+    } catch (err) {
+      console.error("plan snapshot", err);
+      setPlanSnapshot(null);
+      setActiveDoseId(null);
+      hydrateDoseForm(null);
+      setPlanError(err instanceof Error ? err.message : "Unable to load immunotherapy plan.");
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [row.id, hydrateDoseForm, activeDoseId]);
+
+  React.useEffect(() => {
+    fetchPlan();
+  }, [fetchPlan]);
+
+  React.useEffect(() => {
+    const channel = supabase
+      .channel(`immunotherapy-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "immunotherapy_doses", filter: `submission_id=eq.${row.id}` },
+        fetchPlan
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "immunotherapy_plans", filter: `submission_id=eq.${row.id}` },
+        fetchPlan
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPlan, row.id]);
