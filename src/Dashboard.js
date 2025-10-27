@@ -5,6 +5,7 @@ import { supabase } from "./supabaseClient";
 import { createAppointmentICS } from "./utils/calendar";
 import { getSignedUrl } from "./storage";
 import AttachmentRow from "./components/AttachmentRow";
+import LabOrders from "./components/LabOrders";
 
 const STATUS_TABS = [
   { key: "all", label: "All" },
@@ -37,6 +38,7 @@ export default function Dashboard({
   const openFetchAttempted = useRef(false);
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
+  const [labOrdersOpen, setLabOrdersOpen] = useState(false);
 
   const showToast = useCallback((tone, message) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -357,6 +359,9 @@ export default function Dashboard({
               Partner Tools
             </button>
           )}
+          <button style={btn} onClick={() => setLabOrdersOpen(true)}>
+            Lab Orders
+          </button>
           <button
             style={btn}
             onClick={() => typeof window !== "undefined" && window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -529,6 +534,8 @@ export default function Dashboard({
           <span>{toast.message}</span>
         </div>
       )}
+
+      {labOrdersOpen && <LabOrders onClose={() => setLabOrdersOpen(false)} clinician={me} />}
     </div>
   );
 }
