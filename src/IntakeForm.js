@@ -290,6 +290,20 @@ export default function IntakeForm() {
   };
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
+  const isPatientNotesColumnError = useCallback((err) => {
+    if (!err) return false;
+
+    const haystack = [err.message, err.details, err.hint]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (haystack.includes("patient_notes")) return true;
+
+    // Supabase may surface undefined column as either Postgres (42703) or PostgREST (PGRST204/PGRST302).
+    return ["42703", "PGRST204", "PGRST302"].includes(err.code);
+  }, []);
+
   async function handleSubmit() {
     if (!validateStep(6)) return;
 
@@ -374,6 +388,7 @@ export default function IntakeForm() {
       let created = baseInsert.data;
       let insErr = baseInsert.error;
 
+      if (isPatientNotesColumnError(insErr)) {
       if (insErr && /patient_notes/.test(insErr.message || "")) {
         schemaMismatch = true;
         const fallbackPayload = { ...payload };
