@@ -8,6 +8,9 @@ export default function AdminAnalytics({ onBack }) {
   const [weekly, setWeekly] = React.useState([]);
   const [triggers, setTriggers] = React.useState([]);
   const [symptoms, setSymptoms] = React.useState([]);
+  const [outcomeLab, setOutcomeLab] = React.useState([]);
+  const [outcomeDevice, setOutcomeDevice] = React.useState([]);
+  const [outcomeSkin, setOutcomeSkin] = React.useState([]);
 
   // NEW: TAT / TTFR KPIs from analytics_tat_30d
   const [kpi, setKpi] = React.useState(null);
@@ -26,6 +29,9 @@ export default function AdminAnalytics({ onBack }) {
         { data: tg, error: e4 },
         { data: sy, error: e5 },
         { data: tat30, error: e6 },
+        { data: outcomeLabData, error: e7 },
+        { data: outcomeDeviceData, error: e8 },
+        { data: outcomeSkinData, error: e9 },
       ] = await Promise.all([
         supabase.from("analytics_status_counts").select("*"),
         supabase.from("analytics_readiness_risk").select("*").maybeSingle(),
@@ -33,9 +39,12 @@ export default function AdminAnalytics({ onBack }) {
         supabase.from("analytics_top_triggers").select("*"),
         supabase.from("analytics_top_symptoms").select("*"),
         supabase.from("analytics_tat_30d").select("*").maybeSingle(), // ← includes TTFR columns
+        supabase.from("analytics_outcomes_lab").select("*"),
+        supabase.from("analytics_outcomes_device").select("*"),
+        supabase.from("analytics_outcomes_skin").select("*"),
       ]);
 
-      const firstErr = e1 || e2 || e3 || e4 || e5 || e6;
+      const firstErr = e1 || e2 || e3 || e4 || e5 || e6 || e7 || e8 || e9;
       if (firstErr) throw new Error(firstErr.message || "Failed to load analytics");
 
       setStatusCounts(sc || []);
@@ -44,6 +53,9 @@ export default function AdminAnalytics({ onBack }) {
       setTriggers(tg || []);
       setSymptoms(sy || []);
       setKpi(tat30 || null);
+      setOutcomeLab(outcomeLabData || []);
+      setOutcomeDevice(outcomeDeviceData || []);
+      setOutcomeSkin(outcomeSkinData || []);
     } catch (e) {
       setErr(e.message || "Failed to load analytics");
     } finally {
@@ -185,6 +197,44 @@ export default function AdminAnalytics({ onBack }) {
           )}
         </Card>
       </div>
+
+      <Card title="Outcome dashboards" style={{ marginTop: 12 }}>
+        <div style={{ display: "grid", gap: 16 }}>
+          <OutcomeSection
+            title="IgE analytes"
+            headers={["Analyte", "Patients", "Avg", "Range"]}
+            rows={outcomeLab}
+            render={(row) => [
+              row.display_name || row.analyte_key,
+              row.patient_count ?? "—",
+              round1(row.avg_value),
+              formatOutcomeRange(row.min_value, row.max_value),
+            ]}
+          />
+          <OutcomeSection
+            title="Device metrics"
+            headers={["Measurement", "Patients", "Median", "P90"]}
+            rows={outcomeDevice}
+            render={(row) => [
+              (row.measurement_type || "").toUpperCase(),
+              row.patient_count ?? "—",
+              round1(row.median_value),
+              round1(row.p90_value),
+            ]}
+          />
+          <OutcomeSection
+            title="Skin prick tests"
+            headers={["Allergen", "Patients", "Avg wheal", "Median wheal"]}
+            rows={outcomeSkin}
+            render={(row) => [
+              row.display_name || row.allergen_key,
+              row.patient_count ?? "—",
+              `${round1(row.avg_wheal_mm)} mm`,
+              `${round1(row.median_wheal_mm)} mm`,
+            ]}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
@@ -208,6 +258,54 @@ function numOrNa(v) {
 function round1(v) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n * 10) / 10 : "—";
+}
+
+function formatOutcomeRange(min, max) {
+  const lo = numOrNa(min);
+  const hi = numOrNa(max);
+  if (lo == null && hi == null) return "—";
+  if (lo == null) return `≤ ${round1(hi)}`;
+  if (hi == null) return `≥ ${round1(lo)}`;
+  return `${round1(lo)} – ${round1(hi)}`;
+}
+
+function OutcomeSection({ title, headers, rows, render }) {
+  return (
+    <div>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      {rows.length === 0 ? (
+        <SmallMuted>No data.</SmallMuted>
+      ) : (
+        <table style={outcomeTable}>
+          <thead>
+            <tr>
+              {headers.map((header) => (
+                <th key={header} style={outcomeTh}>
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const key =
+                row.analyte_key || row.measurement_type || row.allergen_key || row.display_name || Math.random();
+              const cells = render(row);
+              return (
+                <tr key={key}>
+                  {cells.map((cell, idx) => (
+                    <td key={idx} style={outcomeTd}>
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 function Card({ title, children, style }) {
@@ -280,3 +378,18 @@ const wrap = { maxWidth: 1000, margin: "24px auto", fontFamily: "system-ui, sans
 const grid3 = { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 };
 const grid2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
 const btn = { padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const outcomeTable = { width: "100%", borderCollapse: "collapse", fontSize: 13 };
+const outcomeTh = {
+  textAlign: "left",
+  borderBottom: "1px solid #e5e7eb",
+  padding: "4px 6px",
+  color: "#6b7280",
+  fontSize: 12,
+  fontWeight: 600,
+  textTransform: "uppercase",
+};
+const outcomeTd = {
+  borderBottom: "1px solid #f3f4f6",
+  padding: "4px 6px",
+  fontVariantNumeric: "tabular-nums",
+};
