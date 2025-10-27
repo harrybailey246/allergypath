@@ -127,6 +127,14 @@ export default function IntakeForm() {
   const [phone, setPhone] = useState("");
   const [date_of_birth, setDOB] = useState("");
   const [nhs_number, setNhs] = useState("");
+  const [guardianContacts, setGuardianContacts] = useState([
+    { name: "", relationship: "", phone: "", email: "" },
+  ]);
+  const [consentSignedAt, setConsentSignedAt] = useState("");
+  const [consentExpiresAt, setConsentExpiresAt] = useState("");
+  const [safeguardingNotes, setSafeguardingNotes] = useState("");
+  const [safeguardingFollowUpAt, setSafeguardingFollowUpAt] = useState("");
+  const [documentReferencesText, setDocumentReferencesText] = useState("");
 
   // history
   const [symptoms, setSymptoms] = useState([]);
@@ -186,6 +194,27 @@ export default function IntakeForm() {
     else setArr([...arr, val]);
   };
 
+  const updateGuardianContact = (index, key, value) => {
+    setGuardianContacts((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], [key]: value };
+      return next;
+    });
+  };
+
+  const addGuardianContact = () => {
+    setGuardianContacts((prev) => [...prev, { name: "", relationship: "", phone: "", email: "" }]);
+  };
+
+  const removeGuardianContact = (index) => {
+    setGuardianContacts((prev) => {
+      if (prev.length === 1) return prev;
+      const next = [...prev];
+      next.splice(index, 1);
+      return next;
+    });
+  };
+
   /* ---------- validation ---------- */
   function validateStep(s) {
     const e = {};
@@ -196,6 +225,20 @@ export default function IntakeForm() {
       if (!email.trim()) e.email = "Email is required.";
       else if (!/^\S+@\S+\.\S+$/.test(email)) e.email = "Enter a valid email.";
       if (!phone.trim()) e.phone = "Phone is required.";
+      const hasGuardian = guardianContacts.some(
+        (c) => c.name.trim() && (c.phone.trim() || c.email.trim())
+      );
+      if (!hasGuardian) {
+        e.guardian_contacts = "Please provide at least one guardian contact with a phone or email.";
+      }
+      guardianContacts.forEach((c) => {
+        const name = c.name.trim();
+        const relationship = c.relationship.trim();
+        const hasContactDetails = c.phone.trim() || c.email.trim();
+        if ((name || relationship || hasContactDetails) && (!name || !relationship || !hasContactDetails)) {
+          e.guardian_contacts = "Each guardian contact needs a name, relationship, and phone or email.";
+        }
+      });
     }
     if (s === 2) {
       if (!symptoms.length) e.symptoms = "Select at least one symptom.";
@@ -216,12 +259,31 @@ export default function IntakeForm() {
   }
 
   const canNext = useMemo(() => {
-    if (step === 1) return first_name && surname && email && phone && date_of_birth;
+    if (step === 1) {
+      const guardianOk = guardianContacts.some(
+        (c) => c.name.trim() && (c.phone.trim() || c.email.trim())
+      );
+      return first_name && surname && email && phone && date_of_birth && guardianOk;
+    }
     if (step === 2) return symptoms.length > 0 && most_severe_reaction.trim().length > 0;
     if (step === 3) return food_triggers.length > 0 && (!food_triggers.includes("other") || other_triggers.trim().length > 0);
     if (step === 6) return confirm_submission && !submitting;
     return true;
-  }, [step, first_name, surname, email, phone, date_of_birth, symptoms, most_severe_reaction, food_triggers, other_triggers, confirm_submission, submitting]);
+  }, [
+    step,
+    first_name,
+    surname,
+    email,
+    phone,
+    date_of_birth,
+    guardianContacts,
+    symptoms,
+    most_severe_reaction,
+    food_triggers,
+    other_triggers,
+    confirm_submission,
+    submitting,
+  ]);
 
   const goNext = () => {
     if (validateStep(step)) setStep((s) => Math.min(totalSteps, s + 1));
@@ -236,6 +298,21 @@ export default function IntakeForm() {
     setWarnMsg("");
     setErrMsg("");
     try {
+      const formattedGuardianContacts = guardianContacts
+        .map((c) => ({
+          name: c.name.trim(),
+          relationship: c.relationship.trim() || null,
+          phone: c.phone.trim() || null,
+          email: c.email.trim() || null,
+        }))
+        .filter((c) => c.name && (c.phone || c.email));
+
+      const docRefs = documentReferencesText
+        .split(/\r?\n|,/g)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const uniqueDocRefs = Array.from(new Set(docRefs));
+
       const payload = {
         first_name,
         surname,
@@ -243,6 +320,9 @@ export default function IntakeForm() {
         phone,
         date_of_birth, // keep as YYYY-MM-DD (backend can store as text/date)
         nhs_number: nhs_number || null,
+        guardian_contacts: formattedGuardianContacts,
+        consent_signed_at: consentSignedAt ? new Date(consentSignedAt).toISOString() : null,
+        consent_expires_at: consentExpiresAt ? new Date(consentExpiresAt).toISOString() : null,
 
         symptoms,
         onset_time: onset_time || null,
@@ -267,6 +347,12 @@ export default function IntakeForm() {
 
         has_auto_injector,
         carries_auto_injector,
+
+        safeguarding_notes: safeguardingNotes.trim() || null,
+        safeguarding_follow_up_at: safeguardingFollowUpAt
+          ? new Date(safeguardingFollowUpAt).toISOString()
+          : null,
+        document_references: uniqueDocRefs,
 
         patient_notes: patient_notes || null,
       };
@@ -373,11 +459,17 @@ export default function IntakeForm() {
       setUploadSkipped(false);
       setConfirmSubmission(false);
       setFirstName(""); setSurname(""); setEmail(""); setPhone(""); setDOB(""); setNhs("");
+      setGuardianContacts([{ name: "", relationship: "", phone: "", email: "" }]);
+      setConsentSignedAt("");
+      setConsentExpiresAt("");
       setSymptoms([]); setOnsetTime(""); setReactionFrequency(""); setMostSevere("");
       setFoodTriggers([]); setOtherTriggers(""); setBakedEgg(false); setBakedMilk(false);
       setAsthma(""); setEczema(false); setHayFever(false); setOtherConditions("");
       setLastAnti(""); setBB(false); setACE(false); setPregnant(false);
-      setHasAI(false); setCarriesAI(false); setPatientNotes("");
+      setHasAI(false); setCarriesAI(false); setSafeguardingNotes("");
+      setSafeguardingFollowUpAt("");
+      setDocumentReferencesText("");
+      setPatientNotes("");
       setErrors({});
     } catch (e) {
       console.error(e);
@@ -455,6 +547,72 @@ export default function IntakeForm() {
                 value={nhs_number}
                 onChange={(e) => setNhs(e.target.value)}
               />
+            </Row>
+            <Row>
+              <Label>Parent / guardian contacts *</Label>
+              <Help>Include at least one contact with a phone number or email address.</Help>
+              <div style={{ display: "grid", gap: 12 }}>
+                {guardianContacts.map((contact, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "grid",
+                      gap: 8,
+                      background: "var(--card)",
+                    }}
+                  >
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <Label>Name *</Label>
+                      <Input
+                        value={contact.name}
+                        onChange={(e) => updateGuardianContact(idx, "name", e.target.value)}
+                        placeholder="e.g. Jane Smith"
+                      />
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <Label>Relationship *</Label>
+                      <Input
+                        value={contact.relationship}
+                        onChange={(e) => updateGuardianContact(idx, "relationship", e.target.value)}
+                        placeholder="e.g. Mother"
+                      />
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <Label>Phone</Label>
+                      <Input
+                        value={contact.phone}
+                        onChange={(e) => updateGuardianContact(idx, "phone", e.target.value)}
+                        placeholder="e.g. 07123 456789"
+                      />
+                    </div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        value={contact.email}
+                        onChange={(e) => updateGuardianContact(idx, "email", e.target.value)}
+                        placeholder="e.g. parent@example.com"
+                      />
+                    </div>
+                    {guardianContacts.length > 1 && (
+                      <div style={{ textAlign: "right" }}>
+                        <Btn type="button" onClick={() => removeGuardianContact(idx)}>
+                          Remove contact
+                        </Btn>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <div>
+                  <Btn type="button" onClick={addGuardianContact}>
+                    + Add another contact
+                  </Btn>
+                </div>
+              </div>
+              {errors.guardian_contacts && <ErrorText>{errors.guardian_contacts}</ErrorText>}
             </Row>
 
             <div style={{ display: "flex", gap: 8 }}>
@@ -572,6 +730,43 @@ export default function IntakeForm() {
                 <Pill active={carries_auto_injector} onClick={() => setCarriesAI((v) => !v)}>I carry it with me</Pill>
               </div>
             </Row>
+            <Row>
+              <Label>Consent timestamps (optional)</Label>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <Label>Consent signed</Label>
+                  <Input
+                    type="datetime-local"
+                    value={consentSignedAt}
+                    onChange={(e) => setConsentSignedAt(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <Label>Consent expires</Label>
+                  <Input
+                    type="datetime-local"
+                    value={consentExpiresAt}
+                    onChange={(e) => setConsentExpiresAt(e.target.value)}
+                  />
+                </div>
+              </div>
+            </Row>
+            <Row>
+              <Label>Safeguarding notes (optional)</Label>
+              <Textarea
+                value={safeguardingNotes}
+                onChange={(e) => setSafeguardingNotes(e.target.value)}
+                placeholder="Share any safeguarding concerns or context for the clinician."
+              />
+            </Row>
+            <Row>
+              <Label>Safeguarding follow-up due (optional)</Label>
+              <Input
+                type="datetime-local"
+                value={safeguardingFollowUpAt}
+                onChange={(e) => setSafeguardingFollowUpAt(e.target.value)}
+              />
+            </Row>
             <div style={{ display: "flex", gap: 8 }}>
               <Btn onClick={goPrev}>← Back</Btn>
               <Btn variant="primary" onClick={goNext}>Next →</Btn>
@@ -584,6 +779,15 @@ export default function IntakeForm() {
           <Page>
             <h2 style={{ marginTop: 0 }}>Upload documents (optional)</h2>
             <p style={{ color: "var(--muted)", marginTop: 0 }}>You can upload photos/letters now or skip this step.</p>
+            <Row>
+              <Label>Document references (optional)</Label>
+              <Help>List any document references, URLs, or storage locations (one per line).</Help>
+              <Textarea
+                value={documentReferencesText}
+                onChange={(e) => setDocumentReferencesText(e.target.value)}
+                placeholder={"e.g. School care plan stored in Google Drive\nSafeguarding report ref 123/ABC"}
+              />
+            </Row>
             <Row>
               <Label>Files</Label>
               <input
