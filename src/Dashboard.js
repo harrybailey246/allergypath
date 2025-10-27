@@ -3,8 +3,9 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { format } from "date-fns";
 import { supabase } from "./supabaseClient";
 import { createAppointmentICS } from "./utils/calendar";
-import { getSignedUrl } from "./storage";
+import { getSignedUrl, getActionPlanUrl, uploadActionPlan, deleteActionPlan } from "./storage";
 import AttachmentRow from "./components/AttachmentRow";
+import LabOrders from "./components/LabOrders";
 
 const STATUS_TABS = [
   { key: "all", label: "All" },
@@ -38,6 +39,12 @@ export default function Dashboard({
   const openFetchAttempted = useRef(false);
   const [toast, setToast] = useState(null);
   const toastTimeoutRef = useRef(null);
+  const [complianceTasks, setComplianceTasks] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState(null);
+  const [includeResolvedTasks, setIncludeResolvedTasks] = useState(false);
+  const [resolvingTaskId, setResolvingTaskId] = useState(null);
+  const [labOrdersOpen, setLabOrdersOpen] = useState(false);
 
   const showToast = useCallback((tone, message) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -50,6 +57,105 @@ export default function Dashboard({
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     };
   }, []);
+
+  const fetchComplianceTasks = useCallback(
+    async ({ refresh = false, includeClosed } = {}) => {
+      const includeFlag = typeof includeClosed === "boolean" ? includeClosed : includeResolvedTasks;
+      setTasksLoading(true);
+      setTasksError(null);
+      try {
+        const { data, error } = await supabase.functions.invoke("compliance-reminders", {
+          body: {
+            action: refresh ? "refresh" : "list",
+            includeClosed: includeFlag,
+          },
+        });
+        if (error) throw error;
+        setComplianceTasks(Array.isArray(data?.tasks) ? data.tasks : []);
+      } catch (err) {
+        console.error("compliance reminders", err);
+        setTasksError(err?.message || "Unable to load compliance tasks.");
+      } finally {
+        setTasksLoading(false);
+      }
+    },
+    [includeResolvedTasks]
+  );
+
+  useEffect(() => {
+    fetchComplianceTasks();
+  }, [fetchComplianceTasks]);
+
+  const resolveComplianceTask = useCallback(
+    async (taskId, resolutionNotes = "") => {
+      if (!taskId) return;
+      setResolvingTaskId(taskId);
+      try {
+        const { data, error } = await supabase.functions.invoke("compliance-reminders", {
+          body: {
+            action: "resolve",
+            taskId,
+            resolutionNotes: resolutionNotes || null,
+            resolvedBy: me?.id || null,
+            includeClosed: includeResolvedTasks,
+          },
+        });
+        if (error) throw error;
+        setComplianceTasks(Array.isArray(data?.tasks) ? data.tasks : []);
+        showToast("success", "Task marked as resolved.");
+      } catch (err) {
+        console.error("resolve compliance task", err);
+        setTasksError(err?.message || "Unable to resolve task.");
+        showToast("error", "Unable to resolve compliance task.");
+      } finally {
+        setResolvingTaskId(null);
+      }
+    },
+    [includeResolvedTasks, me?.id, showToast]
+  );
+
+  const exportComplianceCSV = useCallback(() => {
+    if (!complianceTasks.length) return;
+    const headers = [
+      "task_id",
+      "task_type",
+      "title",
+      "status",
+      "due_at",
+      "details",
+      "patient_name",
+      "patient_email",
+      "severity",
+      "created_at",
+      "resolved_at",
+    ];
+    const lines = [headers.join(",")];
+    complianceTasks.forEach((task) => {
+      const submission = task.submission || {};
+      const name = `${submission.first_name || ""} ${submission.surname || ""}`.trim();
+      const row = [
+        safe(task.id),
+        safe(task.task_type),
+        safe(task.title),
+        safe(task.status),
+        task.due_at ? new Date(task.due_at).toISOString() : "",
+        safe(task.details || ""),
+        safe(name),
+        safe(submission.email || ""),
+        safe((task.metadata && task.metadata.severity) || ""),
+        task.created_at ? new Date(task.created_at).toISOString() : "",
+        task.resolved_at ? new Date(task.resolved_at).toISOString() : "",
+      ];
+      lines.push(row.map(csvEscape).join(","));
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `compliance_tasks_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [complianceTasks]);
 
   const notifyStatusUpdated = useCallback(
     async (submission, nextStatus) => {
@@ -95,7 +201,7 @@ export default function Dashboard({
     let query = supabase
       .from("submissions")
       .select(
-        "id,created_at,first_name,surname,email,flags,spt_ready,high_risk,status,symptoms,food_triggers,clinician_notes,attachments,clinician_id,clinician_email",
+        "id,created_at,first_name,surname,email,flags,spt_ready,high_risk,status,symptoms,food_triggers,clinician_notes,attachments,clinician_id,clinician_email,guardian_contacts,consent_signed_at,consent_expires_at,safeguarding_notes,safeguarding_follow_up_at,document_references",
         { count: "exact" }
       )
       .order("created_at", { ascending: false })
@@ -147,6 +253,19 @@ export default function Dashboard({
     setNotes(row.clinician_notes || "");
     setDetailAction(action);
   }, []);
+
+  const openTaskSubmission = useCallback(
+    (task) => {
+      if (!task) return;
+      const match = rows.find((r) => r.id === task.submission_id);
+      if (match) {
+        openDetail(match);
+      } else if (task.submission_id) {
+        setPendingOpenId(task.submission_id);
+      }
+    },
+    [rows, openDetail]
+  );
 
   const clearOpenParam = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -373,6 +492,9 @@ export default function Dashboard({
               Partner Tools
             </button>
           )}
+          <button style={btn} onClick={() => setLabOrdersOpen(true)}>
+            Lab Orders
+          </button>
           <button
             style={btn}
             onClick={() => typeof window !== "undefined" && window.scrollTo({ top: 0, behavior: "smooth" })}
@@ -428,6 +550,102 @@ export default function Dashboard({
             Next ▶
           </button>
         </div>
+      </div>
+
+      {/* Compliance tasks */}
+      <div style={{ ...card, marginBottom: 16, display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Compliance tasks</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              style={btn}
+              onClick={() => fetchComplianceTasks({ refresh: true })}
+              disabled={tasksLoading}
+            >
+              {tasksLoading ? "Syncing…" : "Sync tasks"}
+            </button>
+            <button style={btn} onClick={exportComplianceCSV} disabled={!complianceTasks.length}>
+              Export report
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 12, color: "#6b7280" }}>
+            <input
+              type="checkbox"
+              checked={includeResolvedTasks}
+              onChange={(e) => {
+                setIncludeResolvedTasks(e.target.checked);
+                fetchComplianceTasks({ refresh: true, includeClosed: e.target.checked });
+              }}
+            />
+            Include resolved
+          </label>
+          <button style={btn} onClick={() => fetchComplianceTasks()} disabled={tasksLoading}>
+            Reload list
+          </button>
+        </div>
+        {tasksError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{tasksError}</div>}
+        {tasksLoading && complianceTasks.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>Loading tasks…</div>
+        ) : complianceTasks.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No outstanding tasks.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {complianceTasks.map((task) => {
+              const submission = task.submission || {};
+              const due = task.due_at ? new Date(task.due_at) : null;
+              const dueText = due ? format(due, "EEE d MMM yyyy HH:mm") : "Not set";
+              const now = new Date();
+              const severity = task.metadata?.severity || (due && due < now ? "overdue" : "upcoming");
+              const severityColor = severity === "overdue" ? "#b91c1c" : severity === "due_soon" ? "#d97706" : "#059669";
+              const statusColor = task.status === "resolved" ? "#059669" : task.status === "pending" ? "#3b82f6" : "#d97706";
+              return (
+                <div key={task.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 220 }}>
+                      <div style={{ fontWeight: 600 }}>{task.title}</div>
+                      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                        {submission.first_name || submission.surname
+                          ? `${submission.first_name || ""} ${submission.surname || ""}`.trim()
+                          : "Unlinked submission"}
+                        {task.task_type ? ` • ${task.task_type.replace(/_/g, " ")}` : ""}
+                      </div>
+                      {task.details && <div style={{ marginTop: 6 }}>{task.details}</div>}
+                      <div style={{ fontSize: 12, color: severityColor, marginTop: 6 }}>
+                        Due {dueText}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gap: 6, justifyItems: "end" }}>
+                      <Badge color={statusColor}>{task.status}</Badge>
+                      <button style={btn} onClick={() => openTaskSubmission(task)}>View submission</button>
+                      {task.status === "open" && (
+                        <button
+                          style={{ ...btn, background: "#111827", color: "#fff" }}
+                          onClick={() => {
+                            const notes = window.prompt("Resolution notes (optional)", "");
+                            resolveComplianceTask(task.id, notes || "");
+                          }}
+                          disabled={resolvingTaskId === task.id}
+                        >
+                          {resolvingTaskId === task.id ? "Resolving…" : "Mark resolved"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {task.metadata?.severity === "overdue" && (
+                    <div style={{ fontSize: 12, color: "#b91c1c" }}>This task is overdue and should be prioritised.</div>
+                  )}
+                  {task.resolved_at && (
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>
+                      Resolved at {new Date(task.resolved_at).toLocaleString("en-GB")}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -524,7 +742,7 @@ export default function Dashboard({
           onUpdate={fetchRows}
           notifyStatusUpdated={notifyStatusUpdated}
           showToast={showToast}
-          initialAction={detailAction}
+          refreshTasks={fetchComplianceTasks}
         />
       )}
 
@@ -549,13 +767,20 @@ export default function Dashboard({
           <span>{toast.message}</span>
         </div>
       )}
+
+      {labOrdersOpen && <LabOrders onClose={() => setLabOrdersOpen(false)} clinician={me} />}
     </div>
   );
 }
 
 /* ---- Detail Panel ---- */
-function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated, showToast, initialAction }) {
-  // notes & status
+function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpdated, showToast, refreshTasks }) {
+  const [localRow, setLocalRow] = React.useState(row);
+
+  React.useEffect(() => {
+    setLocalRow(row);
+  }, [row]);
+
   const saveNotes = async () => {
     const { error } = await supabase
       .from("submissions")
@@ -565,7 +790,10 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
       })
       .eq("id", row.id);
     if (error) alert("Failed to save: " + error.message);
-    else onUpdate();
+    else {
+      setLocalRow((prev) => ({ ...prev, clinician_notes: notes }));
+      onUpdate();
+    }
   };
 
   const updateStatus = async (next) => {
@@ -580,14 +808,15 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
       .single();
     if (error) alert("Update failed: " + error.message);
     else {
+      setLocalRow((prev) => ({ ...prev, ...(data || {}), status: data?.status ?? next }));
       onUpdate();
       notifyStatusUpdated(data, data?.status ?? next);
     }
   };
 
   const attachments = React.useMemo(
-    () => (Array.isArray(row.attachments) ? row.attachments.filter(Boolean) : []),
-    [row.attachments]
+    () => (Array.isArray(localRow.attachments) ? localRow.attachments.filter(Boolean) : []),
+    [localRow.attachments]
   );
   const [attachmentState, setAttachmentState] = React.useState({});
   const mountedRef = React.useRef(true);
@@ -658,7 +887,197 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   const attachmentsLoading = attachments.some((path) => attachmentState[path]?.loading);
   const attachmentsErrored = attachments.some((path) => attachmentState[path]?.error);
 
-  // scheduling state + loaders
+  const guardians = React.useMemo(
+    () => (Array.isArray(localRow.guardian_contacts) ? localRow.guardian_contacts : []),
+    [localRow.guardian_contacts]
+  );
+
+  const [consentSignedDraft, setConsentSignedDraft] = React.useState("");
+  const [consentExpiresDraft, setConsentExpiresDraft] = React.useState("");
+  const [safeguardingNotesDraft, setSafeguardingNotesDraft] = React.useState("");
+  const [safeguardingFollowUpDraft, setSafeguardingFollowUpDraft] = React.useState("");
+  const [documentRefsDraft, setDocumentRefsDraft] = React.useState("");
+  const [savingCompliance, setSavingCompliance] = React.useState(false);
+
+  React.useEffect(() => {
+    setConsentSignedDraft(toLocalInput(localRow.consent_signed_at));
+    setConsentExpiresDraft(toLocalInput(localRow.consent_expires_at));
+    setSafeguardingNotesDraft(localRow.safeguarding_notes || "");
+    setSafeguardingFollowUpDraft(toLocalInput(localRow.safeguarding_follow_up_at));
+    setDocumentRefsDraft(
+      Array.isArray(localRow.document_references) ? localRow.document_references.join("\n") : ""
+    );
+  }, [localRow]);
+
+  const saveCompliance = async () => {
+    setSavingCompliance(true);
+    try {
+      const refs = documentRefsDraft
+        .split(/\r?\n|,/g)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const payload = {
+        consent_signed_at: consentSignedDraft ? new Date(consentSignedDraft).toISOString() : null,
+        consent_expires_at: consentExpiresDraft ? new Date(consentExpiresDraft).toISOString() : null,
+        safeguarding_notes: safeguardingNotesDraft.trim() || null,
+        safeguarding_follow_up_at: safeguardingFollowUpDraft
+          ? new Date(safeguardingFollowUpDraft).toISOString()
+          : null,
+        document_references: refs,
+        updated_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase
+        .from("submissions")
+        .update(payload)
+        .eq("id", row.id)
+        .select("*")
+        .single();
+      if (error) throw error;
+      setLocalRow((prev) => ({ ...prev, ...(data || {}) }));
+      onUpdate();
+      refreshTasks?.({ refresh: true });
+      showToast?.("success", "Compliance details saved.");
+    } catch (err) {
+      console.error("save compliance", err);
+      alert("Failed to save compliance details: " + (err?.message || err));
+    } finally {
+      setSavingCompliance(false);
+    }
+  };
+
+  const [actionPlans, setActionPlans] = React.useState([]);
+  const [actionPlansLoading, setActionPlansLoading] = React.useState(false);
+  const [actionPlanError, setActionPlanError] = React.useState(null);
+  const [actionPlanFile, setActionPlanFile] = React.useState(null);
+  const [actionPlanCategory, setActionPlanCategory] = React.useState("general");
+  const [actionPlanLinks, setActionPlanLinks] = React.useState({});
+  const [actionPlanUploading, setActionPlanUploading] = React.useState(false);
+
+  const fetchActionPlans = useCallback(async () => {
+    setActionPlansLoading(true);
+    setActionPlanError(null);
+    const { data, error } = await supabase
+      .from("action_plans")
+      .select("id, category, storage_path, created_at, uploaded_email, uploaded_by")
+      .eq("submission_id", row.id)
+      .order("created_at", { ascending: false });
+    if (error) {
+      setActionPlanError(error.message);
+      setActionPlans([]);
+    } else {
+      setActionPlans(data || []);
+    }
+    setActionPlansLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchActionPlans();
+    const ch = supabase
+      .channel(`action-plans-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "action_plans", filter: `submission_id=eq.${row.id}` },
+        fetchActionPlans
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchActionPlans, row.id]);
+
+  React.useEffect(() => {
+    setActionPlanLinks((prev) => {
+      const next = {};
+      actionPlans.forEach((plan) => {
+        next[plan.id] = prev[plan.id] || { url: null, loading: false, error: null };
+      });
+      return next;
+    });
+  }, [actionPlans]);
+
+  const loadActionPlanLink = React.useCallback(async (plan) => {
+    if (!plan) return;
+    setActionPlanLinks((prev) => ({
+      ...prev,
+      [plan.id]: { ...(prev[plan.id] || {}), loading: true, error: null },
+    }));
+    try {
+      const url = await getActionPlanUrl(plan.storage_path);
+      setActionPlanLinks((prev) => ({
+        ...prev,
+        [plan.id]: { url, loading: false, error: null },
+      }));
+    } catch (err) {
+      setActionPlanLinks((prev) => ({
+        ...prev,
+        [plan.id]: {
+          url: null,
+          loading: false,
+          error: err?.message ? `Unable to prepare download: ${err.message}` : "Unable to prepare download.",
+        },
+      }));
+    }
+  }, []);
+
+  React.useEffect(() => {
+    actionPlans.forEach((plan) => {
+      const entry = actionPlanLinks[plan.id];
+      if (!entry || (!entry.url && !entry.loading && !entry.error)) {
+        loadActionPlanLink(plan);
+      }
+    });
+  }, [actionPlans, actionPlanLinks, loadActionPlanLink]);
+
+  const uploadActionPlanFile = async () => {
+    if (!actionPlanFile) {
+      setActionPlanError("Select a file to upload.");
+      return;
+    }
+    setActionPlanUploading(true);
+    setActionPlanError(null);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const { path } = await uploadActionPlan(actionPlanFile, {
+        submissionId: row.id,
+        category: actionPlanCategory,
+      });
+      const { error } = await supabase.from("action_plans").insert([
+        {
+          submission_id: row.id,
+          category: actionPlanCategory,
+          storage_path: path,
+          uploaded_by: userData?.user?.id ?? null,
+          uploaded_email: userData?.user?.email ?? null,
+        },
+      ]);
+      if (error) throw error;
+      setActionPlanFile(null);
+      showToast?.("success", "Action plan uploaded.");
+      fetchActionPlans();
+    } catch (err) {
+      console.error("upload action plan", err);
+      setActionPlanError(err?.message || "Unable to upload action plan.");
+    } finally {
+      setActionPlanUploading(false);
+    }
+  };
+
+  const removeActionPlan = async (plan) => {
+    if (!plan) return;
+    const confirmed = window.confirm("Remove this action plan?");
+    if (!confirmed) return;
+    try {
+      await deleteActionPlan(plan.storage_path);
+    } catch (err) {
+      console.error("delete action plan file", err);
+    }
+    const { error } = await supabase.from("action_plans").delete().eq("id", plan.id);
+    if (error) {
+      alert("Failed to delete action plan: " + error.message);
+      return;
+    }
+    fetchActionPlans();
+    showToast?.("success", "Action plan removed.");
+  };
+
   const [appointments, setAppointments] = React.useState([]);
   const [appointmentRequests, setAppointmentRequests] = React.useState([]);
   const [startAt, setStartAt] = React.useState("");
@@ -917,95 +1336,76 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   }, [fetchAppointmentRequests, row.id]);
 
   const createAppointment = async () => {
-    if (!startAt || !endAt) {
-      alert("Please set start and end.");
-      return;
-    }
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user;
-    const { data: appointment, error } = await supabase
-      .from("appointments")
-      .insert([
-        {
-          submission_id: row.id,
-          start_at: new Date(startAt).toISOString(),
-          end_at: new Date(endAt).toISOString(),
-          location: location || null,
-          notes: apptNotes || null,
-          created_by: user?.id ?? null,
-        },
-      ])
-      .select("id,start_at,end_at,location,notes")
-      .single();
-    if (error) {
-      alert("Failed to create: " + error.message);
-      return;
-    }
-    setLocation("");
-    setApptNotes("");
-    fetchAppointments();
+    if (!startAt || !endAt) return alert("Provide start and end times.");
     try {
-      const appointmentPayload =
-        appointment ?? {
-          id: "",
-          start_at: new Date(startAt).toISOString(),
-          end_at: new Date(endAt).toISOString(),
-          location: location || null,
-          notes: apptNotes || null,
-        };
-      const { error: notifyError } = await supabase.functions.invoke("notify-email", {
-        body: {
-          type: "appointment_created",
-          submission: {
-            id: row.id,
-            first_name: row.first_name,
-            surname: row.surname,
-            email: row.email,
-            clinician_email: row.clinician_email,
+      const { data, error } = await supabase
+        .from("appointments")
+        .insert([
+          {
+            submission_id: row.id,
+            start_at: new Date(startAt).toISOString(),
+            end_at: new Date(endAt).toISOString(),
+            location: location || null,
+            notes: apptNotes || null,
           },
-          appointment: appointmentPayload,
-          actorEmail: user?.email ?? null,
-        },
-      });
-      if (notifyError) throw notifyError;
-    } catch (err) {
-      console.error("notify-email appointment_created failed", err);
-      showToast?.("error", "Appointment created, but email notification failed to send.");
+        ])
+        .select("*")
+        .single();
+      if (error) throw error;
+      fetchAppointments();
+      setStartAt("");
+      setEndAt("");
+      setLocation("");
+      setApptNotes("");
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const actorEmail = userData?.user?.email || null;
+        await supabase.functions.invoke("notify-email", {
+          body: {
+            type: "appointment_created",
+            submission: localRow,
+            appointment: data,
+            actorEmail,
+          },
+        });
+      } catch (err) {
+        console.error("notify-email appointment_created failed", err);
+        showToast?.("error", "Appointment saved, but email notification failed to send.");
+      }
+    } catch (error) {
+      alert("Appointment error: " + (error?.message || error));
     }
   };
 
   const updateRequestStatus = async (request, status) => {
-    const { error, data: updated } = await supabase
+    const { data: updated, error } = await supabase
       .from("appointment_requests")
-      .update({
-        status,
-        handled_at: status === "resolved" ? new Date().toISOString() : null,
-      })
+      .update({ status, handled_at: new Date().toISOString() })
       .eq("id", request.id)
-      .select("id, appointment_id, request_type, message, status, patient_email, handled_at")
+      .select("*")
       .single();
     if (error) {
-      alert("Failed to update request: " + error.message);
-    } else {
-      fetchAppointmentRequests();
-      if (!updated) return;
-      const appointment =
-        updated.appointment_id && appointments
-          ? appointments.find((a) => String(a.id) === String(updated.appointment_id)) || null
-          : null;
+      alert("Update failed: " + error.message);
+      return;
+    }
+    fetchAppointmentRequests();
+    if (status === "resolved") {
       try {
-        const { data: authData } = await supabase.auth.getUser();
-        const actorEmail = authData?.user?.email ?? null;
+        const { data: userData } = await supabase.auth.getUser();
+        const actorEmail = userData?.user?.email || null;
+        let appointment = null;
+        if (updated.appointment_id) {
+          const { data: appt } = await supabase
+            .from("appointments")
+            .select("id, start_at, end_at, location, notes")
+            .eq("id", updated.appointment_id)
+            .maybeSingle();
+          appointment = appt || null;
+        }
         const { error: notifyError } = await supabase.functions.invoke("notify-email", {
           body: {
             type: "appointment_request_resolved",
-            submission: {
-              id: row.id,
-              first_name: row.first_name,
-              surname: row.surname,
-              email: row.email,
-              clinician_email: row.clinician_email,
-            },
+            submission: localRow,
             request: updated,
             appointment,
             actorEmail,
@@ -1021,7 +1421,7 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
 
   const downloadICS = (appt) => {
     try {
-      const { blob, filename } = createAppointmentICS(appt, row);
+      const { blob, filename } = createAppointmentICS(appt, localRow);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1033,7 +1433,6 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
     }
   };
 
-  // comments thread
   const [comments, setComments] = React.useState([]);
   const [newComment, setNewComment] = React.useState("");
 
@@ -1083,237 +1482,219 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
 
   return (
     <div style={panel}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2>{row.first_name} {row.surname}</h2>
+        <h2>{localRow.first_name} {localRow.surname}</h2>
         <button onClick={onClose} style={btn}>Close ✖</button>
       </div>
 
-      <p style={{ color: "#6b7280" }}>{row.email}</p>
+      <p style={{ color: "#6b7280" }}>{localRow.email}</p>
 
-      {/* Summary */}
       <h4>Symptoms</h4>
-      <p>{Array.isArray(row.symptoms) ? row.symptoms.join(", ") : row.symptoms}</p>
+      <p>{Array.isArray(localRow.symptoms) ? localRow.symptoms.join(", ") : localRow.symptoms}</p>
 
       <h4>Most Severe Reaction</h4>
-      <p>{row.most_severe_reaction}</p>
+      <p>{localRow.most_severe_reaction}</p>
 
       <h4>Triggers</h4>
-      <p>{Array.isArray(row.food_triggers) ? row.food_triggers.join(", ") : row.food_triggers}</p>
+      <p>{Array.isArray(localRow.food_triggers) ? localRow.food_triggers.join(", ") : localRow.food_triggers}</p>
 
       <h4>Flags</h4>
-      <p>{Array.isArray(row.flags) ? row.flags.join(" • ") : "—"}</p>
+      <p>{Array.isArray(localRow.flags) ? localRow.flags.join(" • ") : "—"}</p>
 
-      {attachments.length > 0 && (
-        <>
-          <h4>Attachments</h4>
+      <h4>Guardian contacts</h4>
+      {guardians.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No guardian contacts recorded.</p>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {guardians.map((g, idx) => (
+            <div key={idx} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontWeight: 600 }}>{g.name || "Unknown"}</div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>{g.relationship || "Relationship not provided"}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                {g.phone ? `📞 ${g.phone}` : ""}
+                {g.phone && g.email ? " • " : ""}
+                {g.email ? `✉️ ${g.email}` : g.phone ? "" : "No contact details"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h4>Consent & safeguarding</h4>
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <Label>Consent signed</Label>
+            <input
+              type="datetime-local"
+              value={consentSignedDraft}
+              onChange={(e) => setConsentSignedDraft(e.target.value)}
+              style={input}
+            />
+          </div>
+          <div style={{ display: "grid", gap: 6 }}>
+            <Label>Consent expires</Label>
+            <input
+              type="datetime-local"
+              value={consentExpiresDraft}
+              onChange={(e) => setConsentExpiresDraft(e.target.value)}
+              style={input}
+            />
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <Label>Safeguarding notes</Label>
+          <textarea
+            value={safeguardingNotesDraft}
+            onChange={(e) => setSafeguardingNotesDraft(e.target.value)}
+            style={{ ...input, minHeight: 80 }}
+          />
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <Label>Follow-up due</Label>
+          <input
+            type="datetime-local"
+            value={safeguardingFollowUpDraft}
+            onChange={(e) => setSafeguardingFollowUpDraft(e.target.value)}
+            style={input}
+          />
+        </div>
+        <div style={{ display: "grid", gap: 6 }}>
+          <Label>Document references</Label>
+          <textarea
+            value={documentRefsDraft}
+            onChange={(e) => setDocumentRefsDraft(e.target.value)}
+            placeholder="One reference per line"
+            style={{ ...input, minHeight: 70 }}
+          />
+          {Array.isArray(localRow.document_references) && localRow.document_references.length > 0 && (
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Current references: {localRow.document_references.join(" • ")}
+            </div>
+          )}
+        </div>
+        <div>
+          <button
+            onClick={saveCompliance}
+            style={{ ...btn, background: "#111827", color: "#fff" }}
+            disabled={savingCompliance}
+          >
+            {savingCompliance ? "Saving…" : "Save compliance details"}
+          </button>
+        </div>
+      </div>
+
+      <h4>Attachments</h4>
+      {attachments.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No patient attachments.</p>
+      ) : (
+        <div style={{ display: "grid", gap: 6 }}>
           {attachmentsLoading && <p style={{ color: "#6b7280" }}>Preparing attachments…</p>}
           {attachmentsErrored && (
             <p style={{ color: "#b91c1c", fontSize: 12 }}>
               Some attachments couldn’t be prepared. Try again below.
             </p>
           )}
-          <div style={{ display: "grid", gap: 6 }}>
-            {attachments.map((path) => {
-              const entry = attachmentState[path] || { url: null, loading: true, error: null };
+          {attachments.map((path) => {
+            const entry = attachmentState[path] || { url: null, loading: true, error: null };
+            return (
+              <AttachmentRow
+                key={path}
+                path={path}
+                url={entry.url}
+                loading={entry.loading}
+                error={entry.error}
+                onRetry={() => retryAttachment(path)}
+                buttonStyle={btn}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      <h4>Action plans</h4>
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <Label>Upload new plan</Label>
+          <div style={{ display: "grid", gap: 6, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
+            <select
+              value={actionPlanCategory}
+              onChange={(e) => setActionPlanCategory(e.target.value)}
+              style={input}
+            >
+              <option value="general">General</option>
+              <option value="anaphylaxis">Anaphylaxis</option>
+              <option value="school">School</option>
+              <option value="travel">Travel</option>
+            </select>
+            <input
+              type="file"
+              onChange={(e) => setActionPlanFile(e.target.files?.[0] || null)}
+              style={input}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button
+              onClick={uploadActionPlanFile}
+              style={btn}
+              disabled={!actionPlanFile || actionPlanUploading}
+            >
+              {actionPlanUploading ? "Uploading…" : "Upload"}
+            </button>
+            {actionPlanFile && (
+              <span style={{ fontSize: 12, color: "#6b7280" }}>{actionPlanFile.name}</span>
+            )}
+          </div>
+        </div>
+        {actionPlanError && <div style={{ color: "#b91c1c", fontSize: 12 }}>{actionPlanError}</div>}
+        {actionPlansLoading && <div style={{ color: "#6b7280" }}>Loading action plans…</div>}
+        {!actionPlansLoading && actionPlans.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No action plans uploaded yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {actionPlans.map((plan) => {
+              const entry = actionPlanLinks[plan.id] || { url: null, loading: true, error: null };
               return (
-                <AttachmentRow
-                  key={path}
-                  path={path}
-                  url={entry.url}
-                  loading={entry.loading}
-                  error={entry.error}
-                  onRetry={() => retryAttachment(path)}
-                  buttonStyle={btn}
-                />
+                <div key={plan.id} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                    <strong style={{ textTransform: "capitalize" }}>{plan.category}</strong>
+                    <span style={{ fontSize: 12, color: "#6b7280" }}>
+                      {new Date(plan.created_at).toLocaleString("en-GB")}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    {plan.uploaded_email ? `Uploaded by ${plan.uploaded_email}` : "Uploader unknown"}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {entry.error ? (
+                      <button style={btn} onClick={() => loadActionPlanLink(plan)}>Retry link</button>
+                    ) : (
+                      <a
+                        href={entry.url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(e) => {
+                          if (!entry.url) e.preventDefault();
+                        }}
+                        style={{
+                          ...btn,
+                          textDecoration: "none",
+                          opacity: entry.loading ? 0.6 : 1,
+                        }}
+                      >
+                        {entry.loading ? "Preparing…" : "Download"}
+                      </a>
+                    )}
+                    <button style={btn} onClick={() => removeActionPlan(plan)}>Delete</button>
+                  </div>
+                  {entry.error && <div style={{ color: "#b91c1c", fontSize: 12 }}>{entry.error}</div>}
+                </div>
               );
             })}
           </div>
-        </>
-      )}
+        )}
+      </div>
 
-      <h4 style={{ marginTop: 16 }}>Immunotherapy plan</h4>
-      {planLoading ? (
-        <div style={{ color: "#6b7280" }}>Loading immunotherapy plan…</div>
-      ) : planError ? (
-        <div style={{ color: "#b91c1c", border: "1px solid #fecaca", background: "#fee2e2", padding: 10, borderRadius: 8 }}>
-          {planError}
-        </div>
-      ) : planDetails ? (
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
-            <div>
-              <div style={{ fontWeight: 600 }}>{planDetails.regimen_stage}</div>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>Status: {planDetails.status}</div>
-            </div>
-            <div style={{ fontSize: 12, color: "#475569" }}>
-              Progress: {planDetails.completed_doses ?? 0}/{planDetails.planned_total_doses ?? "—"}
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>
-            Allowed gap: {planDetails.allowed_gap_days ?? "—"} days
-            {planDetails.recommended_gap_action && (
-              <>
-                {" • "}
-                {planDetails.recommended_gap_action}
-              </>
-            )}
-          </div>
-          {planSnapshot?.overdue_count > 0 && (
-            <div style={{ color: "#b91c1c", fontSize: 12 }}>
-              ⚠️ {planSnapshot.overdue_count} dose{planSnapshot.overdue_count === 1 ? "" : "s"} overdue
-            </div>
-          )}
-          {nextRecommendation && (
-            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 10, display: "grid", gap: 6 }}>
-              <div style={{ fontWeight: 600 }}>Next dose #{nextRecommendation.dose_number}</div>
-              <div style={{ fontSize: 12, color: "#475569" }}>
-                {nextRecommendation.scheduled_at
-                  ? `Scheduled ${new Date(nextRecommendation.scheduled_at).toLocaleString("en-GB")}`
-                  : "Scheduling pending"}
-              </div>
-              {nextRecommendation.gap_flag && (
-                <div style={{ color: "#b91c1c", fontSize: 12 }}>
-                  🚨 Gap flagged ({nextRecommendation.gap_days ?? "?"} days)
-                </div>
-              )}
-              <div>{nextRecommendation.recommendation}</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={applyRecommendation} style={btn}>Apply recommendation</button>
-              </div>
-            </div>
-          )}
-          <div>
-            <h5 style={{ margin: "4px 0" }}>Recorded doses</h5>
-            {planDoses.length === 0 ? (
-              <div style={{ color: "#6b7280", fontSize: 12 }}>No doses tracked yet.</div>
-            ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                {planDoses.map((dose) => (
-                  <div
-                    key={dose.id}
-                    style={{
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 10,
-                      padding: 10,
-                      background: activeDoseId === dose.id ? "#f0f9ff" : "white",
-                      display: "grid",
-                      gap: 4,
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                      <div style={{ fontWeight: 600 }}>Dose #{dose.dose_number}</div>
-                      <button style={{ ...btn, padding: "4px 8px", fontSize: 12 }} onClick={() => openDoseEditor(dose)}>
-                        Edit
-                      </button>
-                    </div>
-                    <div style={{ fontSize: 12, color: "#475569" }}>
-                      Planned: {dose.planned_dose ?? "—"}
-                      {dose.planned_dose_unit ? ` ${dose.planned_dose_unit}` : ""}
-                      {dose.scheduled_at && (
-                        <>
-                          {" • "}
-                          Scheduled {new Date(dose.scheduled_at).toLocaleString("en-GB")}
-                        </>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#475569" }}>
-                      Administered: {dose.administered_dose ?? "—"}
-                      {dose.administered_dose_unit ? ` ${dose.administered_dose_unit}` : ""}
-                      {dose.administered_at && (
-                        <>
-                          {" • "}
-                          {new Date(dose.administered_at).toLocaleString("en-GB")}
-                        </>
-                      )}
-                    </div>
-                    {dose.gap_flag && (
-                      <div style={{ color: "#b91c1c", fontSize: 12 }}>
-                        ⚠️ Gap {dose.gap_days ?? "?"} days – {dose.recommendation || "Review protocol."}
-                      </div>
-                    )}
-                    {dose.lot_number && (
-                      <div style={{ fontSize: 12, color: "#475569" }}>
-                        Lot {dose.lot_number}
-                        {dose.lot_expiration_date && ` (exp. ${dose.lot_expiration_date})`}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div>
-            <h5 style={{ margin: "4px 0" }}>Dose adjustments</h5>
-            {activeDoseId ? (
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                  <div>
-                    <Label>Scheduled</Label>
-                    <input
-                      type="datetime-local"
-                      value={doseForm.scheduledAt}
-                      onChange={handleDoseFieldChange("scheduledAt")}
-                      style={input}
-                    />
-                  </div>
-                  <div>
-                    <Label>Administered at</Label>
-                    <input
-                      type="datetime-local"
-                      value={doseForm.administeredAt}
-                      onChange={handleDoseFieldChange("administeredAt")}
-                      style={input}
-                    />
-                  </div>
-                  <div>
-                    <Label>Planned dose</Label>
-                    <input
-                      value={doseForm.plannedDose}
-                      onChange={handleDoseFieldChange("plannedDose")}
-                      placeholder="e.g. 0.5"
-                      style={input}
-                    />
-                  </div>
-                  <div>
-                    <Label>Administered dose</Label>
-                    <input
-                      value={doseForm.administeredDose}
-                      onChange={handleDoseFieldChange("administeredDose")}
-                      placeholder="e.g. 0.4"
-                      style={input}
-                    />
-                  </div>
-                  <div>
-                    <Label>Lot number</Label>
-                    <input value={doseForm.lotNumber} onChange={handleDoseFieldChange("lotNumber")} style={input} />
-                  </div>
-                  <div>
-                    <Label>Lot expiry</Label>
-                    <input type="date" value={doseForm.lotExpiry} onChange={handleDoseFieldChange("lotExpiry")} style={input} />
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    onClick={saveDoseAdjustment}
-                    style={{ ...btn, opacity: doseSaving ? 0.7 : 1 }}
-                    disabled={doseSaving}
-                  >
-                    {doseSaving ? "Saving…" : "Save adjustments"}
-                  </button>
-                  <button onClick={clearDoseForm} style={btn}>Clear</button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ color: "#6b7280", fontSize: 12 }}>Select a dose above to edit dosing details.</div>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div style={{ color: "#6b7280" }}>No immunotherapy plan linked yet.</div>
-      )}
-
-      {/* Notes */}
       <h4>Clinician Notes</h4>
       <textarea
         value={notes}
@@ -1323,7 +1704,6 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
       />
       <button onClick={saveNotes} style={btn}>Save Notes</button>
 
-      {/* Status */}
       <h4>Update Status</h4>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button onClick={() => updateStatus("ready_spt")} style={btn}>Mark Ready</button>
@@ -1331,7 +1711,6 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
         <button onClick={() => updateStatus("completed")} style={btn}>Complete</button>
       </div>
 
-      {/* Scheduling */}
       <h4 style={{ marginTop: 16 }}>Schedule appointment</h4>
       <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
         <div>
@@ -1411,7 +1790,6 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
         )}
       </div>
 
-      {/* Comments thread */}
       <h4 style={{ marginTop: 16 }}>Clinician thread</h4>
       <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 8, marginBottom: 8 }}>
         <div style={{ display: "grid", gap: 8 }}>
@@ -1521,6 +1899,14 @@ const panel = {
   WebkitOverflowScrolling: "touch",
   zIndex: 1000,
 };
+
+function toLocalInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offset = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+}
 
 /* ---- CSV helpers ---- */
 function safe(v) { return (v ?? "").toString(); }
