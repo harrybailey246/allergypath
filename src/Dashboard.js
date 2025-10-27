@@ -666,6 +666,115 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   const [location, setLocation] = React.useState("");
   const [apptNotes, setApptNotes] = React.useState("");
 
+  const [planSnapshot, setPlanSnapshot] = React.useState(null);
+  const [planLoading, setPlanLoading] = React.useState(false);
+  const [planError, setPlanError] = React.useState(null);
+  const [activeDoseId, setActiveDoseId] = React.useState(null);
+  const [doseForm, setDoseForm] = React.useState({
+    scheduledAt: "",
+    administeredAt: "",
+    plannedDose: "",
+    administeredDose: "",
+    lotNumber: "",
+    lotExpiry: "",
+  });
+  const [doseSaving, setDoseSaving] = React.useState(false);
+
+  const toLocalDateTimeInput = React.useCallback((value) => {
+    if (!value) return "";
+    try {
+      return format(new Date(value), "yyyy-MM-dd'T'HH:mm");
+    } catch (err) {
+      return "";
+    }
+  }, []);
+
+  const hydrateDoseForm = React.useCallback(
+    (dose) => {
+      if (!dose) {
+        setDoseForm({
+          scheduledAt: "",
+          administeredAt: "",
+          plannedDose: "",
+          administeredDose: "",
+          lotNumber: "",
+          lotExpiry: "",
+        });
+        return;
+      }
+      setDoseForm({
+        scheduledAt: toLocalDateTimeInput(dose.scheduled_at),
+        administeredAt: toLocalDateTimeInput(dose.administered_at),
+        plannedDose: dose.planned_dose !== null && dose.planned_dose !== undefined ? String(dose.planned_dose) : "",
+        administeredDose:
+          dose.administered_dose !== null && dose.administered_dose !== undefined
+            ? String(dose.administered_dose)
+            : "",
+        lotNumber: dose.lot_number || "",
+        lotExpiry: dose.lot_expiration_date || "",
+      });
+    },
+    [toLocalDateTimeInput]
+  );
+
+  const fetchPlan = React.useCallback(async () => {
+    setPlanLoading(true);
+    setPlanError(null);
+    try {
+      const { data, error } = await supabase.rpc("immunotherapy_plan_snapshot", { submission_id: row.id });
+      if (error) throw error;
+      setPlanSnapshot(data);
+      if (!data) {
+        setActiveDoseId(null);
+        hydrateDoseForm(null);
+        return;
+      }
+      if (data?.next_recommendation) {
+        const nextId = data.next_recommendation.dose_id || null;
+        setActiveDoseId((prev) => (prev === null ? nextId : prev));
+        const target = Array.isArray(data?.doses)
+          ? data.doses.find((dose) => dose.id === nextId) || data.next_recommendation
+          : data.next_recommendation;
+        if (activeDoseId === null || activeDoseId === nextId) {
+          hydrateDoseForm(target);
+        }
+      } else if (activeDoseId === null) {
+        hydrateDoseForm(null);
+      }
+    } catch (err) {
+      console.error("plan snapshot", err);
+      setPlanSnapshot(null);
+      setActiveDoseId(null);
+      hydrateDoseForm(null);
+      setPlanError(err instanceof Error ? err.message : "Unable to load immunotherapy plan.");
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [row.id, hydrateDoseForm, activeDoseId]);
+
+  React.useEffect(() => {
+    fetchPlan();
+  }, [fetchPlan]);
+
+  React.useEffect(() => {
+    const channel = supabase
+      .channel(`immunotherapy-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "immunotherapy_doses", filter: `submission_id=eq.${row.id}` },
+        fetchPlan
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "immunotherapy_plans", filter: `submission_id=eq.${row.id}` },
+        fetchPlan
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchPlan, row.id]);
+
   const nextRecommendation = planSnapshot?.next_recommendation || null;
 
   const openDoseEditor = React.useCallback(
@@ -1417,111 +1526,3 @@ const panel = {
 function safe(v) { return (v ?? "").toString(); }
 function arr(a) { return Array.isArray(a) ? a.join("|") : safe(a); }
 function csvEscape(s) { return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
-  const [planSnapshot, setPlanSnapshot] = React.useState(null);
-  const [planLoading, setPlanLoading] = React.useState(false);
-  const [planError, setPlanError] = React.useState(null);
-  const [activeDoseId, setActiveDoseId] = React.useState(null);
-  const [doseForm, setDoseForm] = React.useState({
-    scheduledAt: "",
-    administeredAt: "",
-    plannedDose: "",
-    administeredDose: "",
-    lotNumber: "",
-    lotExpiry: "",
-  });
-  const [doseSaving, setDoseSaving] = React.useState(false);
-
-  const toLocalDateTimeInput = React.useCallback((value) => {
-    if (!value) return "";
-    try {
-      return format(new Date(value), "yyyy-MM-dd'T'HH:mm");
-    } catch (err) {
-      return "";
-    }
-  }, []);
-
-  const hydrateDoseForm = React.useCallback(
-    (dose) => {
-      if (!dose) {
-        setDoseForm({
-          scheduledAt: "",
-          administeredAt: "",
-          plannedDose: "",
-          administeredDose: "",
-          lotNumber: "",
-          lotExpiry: "",
-        });
-        return;
-      }
-      setDoseForm({
-        scheduledAt: toLocalDateTimeInput(dose.scheduled_at),
-        administeredAt: toLocalDateTimeInput(dose.administered_at),
-        plannedDose: dose.planned_dose !== null && dose.planned_dose !== undefined ? String(dose.planned_dose) : "",
-        administeredDose:
-          dose.administered_dose !== null && dose.administered_dose !== undefined
-            ? String(dose.administered_dose)
-            : "",
-        lotNumber: dose.lot_number || "",
-        lotExpiry: dose.lot_expiration_date || "",
-      });
-    },
-    [toLocalDateTimeInput]
-  );
-
-  const fetchPlan = React.useCallback(async () => {
-    setPlanLoading(true);
-    setPlanError(null);
-    try {
-      const { data, error } = await supabase.rpc("immunotherapy_plan_snapshot", { submission_id: row.id });
-      if (error) throw error;
-      setPlanSnapshot(data);
-      if (!data) {
-        setActiveDoseId(null);
-        hydrateDoseForm(null);
-        return;
-      }
-      if (data?.next_recommendation) {
-        const nextId = data.next_recommendation.dose_id || null;
-        setActiveDoseId((prev) => (prev === null ? nextId : prev));
-        const target = Array.isArray(data?.doses)
-          ? data.doses.find((dose) => dose.id === nextId) || data.next_recommendation
-          : data.next_recommendation;
-        if (activeDoseId === null || activeDoseId === nextId) {
-          hydrateDoseForm(target);
-        }
-      } else if (activeDoseId === null) {
-        hydrateDoseForm(null);
-      }
-    } catch (err) {
-      console.error("plan snapshot", err);
-      setPlanSnapshot(null);
-      setActiveDoseId(null);
-      hydrateDoseForm(null);
-      setPlanError(err instanceof Error ? err.message : "Unable to load immunotherapy plan.");
-    } finally {
-      setPlanLoading(false);
-    }
-  }, [row.id, hydrateDoseForm, activeDoseId]);
-
-  React.useEffect(() => {
-    fetchPlan();
-  }, [fetchPlan]);
-
-  React.useEffect(() => {
-    const channel = supabase
-      .channel(`immunotherapy-${row.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "immunotherapy_doses", filter: `submission_id=eq.${row.id}` },
-        fetchPlan
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "immunotherapy_plans", filter: `submission_id=eq.${row.id}` },
-        fetchPlan
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [fetchPlan, row.id]);
