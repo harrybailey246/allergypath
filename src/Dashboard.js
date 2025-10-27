@@ -3,6 +3,11 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 import { format } from "date-fns";
 import { supabase } from "./supabaseClient";
 import { createAppointmentICS } from "./utils/calendar";
+import {
+  ingestDeviceReadings,
+  ingestLabResults,
+  ingestSkinTests,
+} from "./utils/measurementIngestion";
 import { getSignedUrl } from "./storage";
 import AttachmentRow from "./components/AttachmentRow";
 
@@ -638,6 +643,186 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   const attachmentsLoading = attachments.some((path) => attachmentState[path]?.loading);
   const attachmentsErrored = attachments.some((path) => attachmentState[path]?.error);
 
+  // clinical measurements (lab, device, skin tests)
+  const [labResults, setLabResults] = React.useState([]);
+  const [labLoading, setLabLoading] = React.useState(true);
+  const [labError, setLabError] = React.useState(null);
+
+  const [deviceReadings, setDeviceReadings] = React.useState([]);
+  const [deviceLoading, setDeviceLoading] = React.useState(true);
+  const [deviceError, setDeviceError] = React.useState(null);
+
+  const [skinTests, setSkinTests] = React.useState([]);
+  const [skinLoading, setSkinLoading] = React.useState(true);
+  const [skinError, setSkinError] = React.useState(null);
+
+  const fetchLabResults = React.useCallback(async () => {
+    setLabLoading(true);
+    setLabError(null);
+    const { data, error } = await supabase
+      .from("lab_results")
+      .select(
+        "id,panel_name,analyte,result_value,result_unit,reference_low,reference_high,reference_text,collected_at,resulted_at,method,lab_name,notes,metadata,created_at"
+      )
+      .eq("submission_id", row.id)
+      .order("collected_at", { ascending: true })
+      .order("resulted_at", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error("fetch lab_results", error);
+      setLabError(error.message || "Unable to load lab results");
+      setLabResults([]);
+    } else {
+      setLabResults(data || []);
+    }
+    setLabLoading(false);
+  }, [row.id]);
+
+  const fetchDeviceReadings = React.useCallback(async () => {
+    setDeviceLoading(true);
+    setDeviceError(null);
+    const { data, error } = await supabase
+      .from("device_readings")
+      .select(
+        "id,device_type,measurement_type,measurement_value,measurement_unit,measurement_time,reference_predicted,reference_percent,metadata,created_at"
+      )
+      .eq("submission_id", row.id)
+      .order("measurement_time", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error("fetch device_readings", error);
+      setDeviceError(error.message || "Unable to load device readings");
+      setDeviceReadings([]);
+    } else {
+      setDeviceReadings(data || []);
+    }
+    setDeviceLoading(false);
+  }, [row.id]);
+
+  const fetchSkinTests = React.useCallback(async () => {
+    setSkinLoading(true);
+    setSkinError(null);
+    const { data, error } = await supabase
+      .from("skin_tests")
+      .select(
+        "id,allergen,wheal_mm,flare_mm,control_wheal_mm,measurement_time,method,notes,metadata,created_at"
+      )
+      .eq("submission_id", row.id)
+      .order("measurement_time", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.error("fetch skin_tests", error);
+      setSkinError(error.message || "Unable to load skin test data");
+      setSkinTests([]);
+    } else {
+      setSkinTests(data || []);
+    }
+    setSkinLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchLabResults();
+    const ch = supabase
+      .channel(`lab-results-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "lab_results", filter: `submission_id=eq.${row.id}` },
+        fetchLabResults
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchLabResults, row.id]);
+
+  React.useEffect(() => {
+    fetchDeviceReadings();
+    const ch = supabase
+      .channel(`device-readings-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "device_readings", filter: `submission_id=eq.${row.id}` },
+        fetchDeviceReadings
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchDeviceReadings, row.id]);
+
+  React.useEffect(() => {
+    fetchSkinTests();
+    const ch = supabase
+      .channel(`skin-tests-${row.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "skin_tests", filter: `submission_id=eq.${row.id}` },
+        fetchSkinTests
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchSkinTests, row.id]);
+
+  const [ingestType, setIngestType] = React.useState("lab");
+  const [ingesting, setIngesting] = React.useState(false);
+  const [ingestFeedback, setIngestFeedback] = React.useState(null);
+  const uploadRef = React.useRef(null);
+
+  const handleIngestFile = React.useCallback(
+    async (event) => {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      setIngesting(true);
+      setIngestFeedback(null);
+      try {
+        let result;
+        if (ingestType === "lab") {
+          result = await ingestLabResults(file, row.id, { panelName: row.panel_name || null });
+          await fetchLabResults();
+        } else if (ingestType === "device") {
+          result = await ingestDeviceReadings(file, row.id, { deviceType: "uploaded" });
+          await fetchDeviceReadings();
+        } else {
+          result = await ingestSkinTests(file, row.id, {});
+          await fetchSkinTests();
+        }
+        if (result?.error) throw result.error;
+        setIngestFeedback({
+          tone: "success",
+          message: `Imported ${result?.inserted ?? 0} records into ${ingestType} data.`,
+        });
+      } catch (err) {
+        const msg = err?.message || err?.error_description || "Unable to ingest file";
+        setIngestFeedback({ tone: "error", message: msg });
+      } finally {
+        setIngesting(false);
+        if (event?.target) event.target.value = "";
+      }
+    },
+    [fetchDeviceReadings, fetchLabResults, fetchSkinTests, ingestType, row.id]
+  );
+
+  const triggerUpload = React.useCallback(() => {
+    uploadRef.current?.click();
+  }, []);
+
+  React.useEffect(() => {
+    if (!ingestFeedback) return undefined;
+    const t = setTimeout(() => setIngestFeedback(null), 6000);
+    return () => clearTimeout(t);
+  }, [ingestFeedback]);
+
+  const igeSeries = React.useMemo(() => buildIgESeries(labResults), [labResults]);
+  const fenoSeries = React.useMemo(
+    () => buildDeviceSeries(deviceReadings, (r) => (r.measurement_type || "").toLowerCase().includes("feno")),
+    [deviceReadings]
+  );
+  const spirometrySeries = React.useMemo(
+    () =>
+      buildDeviceSeries(
+        deviceReadings,
+        (r) => /fev|fvc|pef/.test((r.measurement_type || "").toLowerCase())
+      ),
+    [deviceReadings]
+  );
+  const skinSeries = React.useMemo(() => buildSkinSeries(skinTests), [skinTests]);
+
   // scheduling state + loaders
   const [appointments, setAppointments] = React.useState([]);
   const [appointmentRequests, setAppointmentRequests] = React.useState([]);
@@ -875,7 +1060,7 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
       <h4>Flags</h4>
       <p>{Array.isArray(row.flags) ? row.flags.join(" • ") : "—"}</p>
 
-      {attachments.length > 0 && (
+  {attachments.length > 0 && (
         <>
           <h4>Attachments</h4>
           {attachmentsLoading && <p style={{ color: "#6b7280" }}>Preparing attachments…</p>}
@@ -901,6 +1086,206 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
             })}
           </div>
         </>
+      )}
+
+      <h4 style={{ marginTop: 16 }}>Clinical Data Ingestion</h4>
+      <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select
+            value={ingestType}
+            onChange={(e) => setIngestType(e.target.value)}
+            style={{ ...input, maxWidth: 160 }}
+          >
+            <option value="lab">Lab results (IgE)</option>
+            <option value="device">Device readings (FeNO/spirometry)</option>
+            <option value="skin">Skin prick tests</option>
+          </select>
+          <button onClick={triggerUpload} style={btn} disabled={ingesting}>
+            {ingesting ? "Importing…" : "Upload CSV/PDF"}
+          </button>
+          <input
+            ref={uploadRef}
+            type="file"
+            accept=".csv,.tsv,application/pdf,text/csv"
+            style={{ display: "none" }}
+            onChange={handleIngestFile}
+          />
+        </div>
+        {ingestFeedback && (
+          <div
+            style={{
+              fontSize: 12,
+              color: ingestFeedback.tone === "error" ? "#b91c1c" : "#059669",
+            }}
+          >
+            {ingestFeedback.message}
+          </div>
+        )}
+      </div>
+
+      <h4 style={{ marginTop: 16 }}>IgE trends</h4>
+      {labLoading ? (
+        <p style={{ color: "#6b7280" }}>Loading lab results…</p>
+      ) : labError ? (
+        <p style={{ color: "#b91c1c" }}>{labError}</p>
+      ) : igeSeries.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No IgE results ingested yet.</p>
+      ) : (
+        <div style={seriesGrid}>
+          {igeSeries.map((series) => (
+            <div key={`ige-${series.key}`} style={clinicalCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong>{series.label}</strong>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>
+                  Latest: {formatNumber(series.latest)} {series.unit || ""}
+                  {series.change != null && (
+                    <span style={{ marginLeft: 6, color: series.change <= 0 ? "#059669" : "#b91c1c" }}>
+                      {series.change > 0 ? "+" : ""}
+                      {formatNumber(series.change)}
+                    </span>
+                  )}
+                </span>
+              </div>
+              <Sparkline points={series.points} reference={series.reference} />
+              {series.reference.text && (
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Ref: {series.reference.text}
+                </div>
+              )}
+              <div style={historyList}>
+                {series.rows
+                  .slice(-4)
+                  .reverse()
+                  .map((row, idx) => (
+                    <div key={`${series.key}-${idx}`} style={historyRow}>
+                      <span>{formatDateShort(row.date)}</span>
+                      <span>
+                        {formatNumber(row.value)} {series.unit || ""}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h4 style={{ marginTop: 16 }}>FeNO readings</h4>
+      {deviceLoading ? (
+        <p style={{ color: "#6b7280" }}>Loading device readings…</p>
+      ) : deviceError ? (
+        <p style={{ color: "#b91c1c" }}>{deviceError}</p>
+      ) : fenoSeries.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No FeNO data ingested yet.</p>
+      ) : (
+        <div style={seriesGrid}>
+          {fenoSeries.map((series) => (
+            <div key={`feno-${series.key}`} style={clinicalCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong>{series.label}</strong>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>
+                  Latest: {formatNumber(series.latest)} {series.unit || ""}
+                </span>
+              </div>
+              <Sparkline points={series.points} color="#2563eb" />
+              {series.referencePredicted != null && (
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  Predicted: {formatNumber(series.referencePredicted)} {series.unit || ""}
+                </div>
+              )}
+              <div style={historyList}>
+                {series.rows
+                  .slice(-4)
+                  .reverse()
+                  .map((row, idx) => (
+                    <div key={`${series.key}-f-${idx}`} style={historyRow}>
+                      <span>{formatDateShort(row.date)}</span>
+                      <span>
+                        {formatNumber(row.value)} {series.unit || ""}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h4 style={{ marginTop: 16 }}>Spirometry curves</h4>
+      {deviceLoading ? (
+        <p style={{ color: "#6b7280" }}>Loading device readings…</p>
+      ) : deviceError ? (
+        <p style={{ color: "#b91c1c" }}>{deviceError}</p>
+      ) : spirometrySeries.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No spirometry data ingested yet.</p>
+      ) : (
+        <div style={seriesGrid}>
+          {spirometrySeries.map((series) => (
+            <div key={`spiro-${series.key}`} style={clinicalCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong>{series.label}</strong>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>
+                  Latest: {formatNumber(series.latest)} {series.unit || ""}
+                </span>
+              </div>
+              <Sparkline points={series.points} color="#7c3aed" />
+              {series.referencePercent != null && (
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  % Predicted: {formatNumber(series.referencePercent, 0)}%
+                </div>
+              )}
+              <div style={historyList}>
+                {series.rows
+                  .slice(-4)
+                  .reverse()
+                  .map((row, idx) => (
+                    <div key={`${series.key}-s-${idx}`} style={historyRow}>
+                      <span>{formatDateShort(row.date)}</span>
+                      <span>
+                        {formatNumber(row.value)} {series.unit || ""}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h4 style={{ marginTop: 16 }}>Skin test wheal diameters</h4>
+      {skinLoading ? (
+        <p style={{ color: "#6b7280" }}>Loading skin tests…</p>
+      ) : skinError ? (
+        <p style={{ color: "#b91c1c" }}>{skinError}</p>
+      ) : skinSeries.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>No skin test data ingested yet.</p>
+      ) : (
+        <div style={seriesGrid}>
+          {skinSeries.map((series) => (
+            <div key={`skin-${series.key}`} style={clinicalCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <strong>{series.label}</strong>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>
+                  Latest wheal: {formatNumber(series.latestWheal)} mm
+                </span>
+              </div>
+              <Sparkline points={series.points} color="#d97706" />
+              <div style={historyList}>
+                {series.rows
+                  .slice(-4)
+                  .reverse()
+                  .map((row, idx) => (
+                    <div key={`${series.key}-k-${idx}`} style={historyRow}>
+                      <span>{formatDateShort(row.date)}</span>
+                      <span>
+                        {row.wheal != null ? `${formatNumber(row.wheal)} mm` : "—"}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Notes */}
@@ -1034,6 +1419,226 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   );
 }
 
+function buildIgESeries(rows) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const analyte = (row?.analyte || "").trim();
+    if (!analyte || !/ige/i.test(analyte)) return;
+    const value = Number(row?.result_value);
+    if (!Number.isFinite(value)) return;
+    const date = row?.collected_at || row?.resulted_at || row?.created_at;
+    const ts = Date.parse(date || "");
+    if (Number.isNaN(ts)) return;
+    const key = analyte.toLowerCase();
+    const current = grouped.get(key) || {
+      key,
+      label: analyte,
+      unit: row?.result_unit || null,
+      reference: {
+        low: toFinite(row?.reference_low),
+        high: toFinite(row?.reference_high),
+        text: row?.reference_text || null,
+      },
+      rows: [],
+    };
+    if (!current.unit && row?.result_unit) current.unit = row.result_unit;
+    if (current.reference.low == null && toFinite(row?.reference_low) != null) {
+      current.reference.low = toFinite(row?.reference_low);
+    }
+    if (current.reference.high == null && toFinite(row?.reference_high) != null) {
+      current.reference.high = toFinite(row?.reference_high);
+    }
+    if (!current.reference.text && row?.reference_text) current.reference.text = row.reference_text;
+    current.rows.push({ ts, date, value });
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values())
+    .map((series) => {
+      const sorted = series.rows.sort((a, b) => a.ts - b.ts);
+      const points = sorted.map((item) => ({ x: item.ts, y: item.value }));
+      const latest = sorted.length ? sorted[sorted.length - 1].value : null;
+      const baseline = sorted.length ? sorted[0].value : null;
+      const change = latest != null && baseline != null ? latest - baseline : null;
+      return {
+        ...series,
+        rows: sorted,
+        points,
+        latest,
+        baseline,
+        change,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildDeviceSeries(rows, predicate) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!predicate(row)) return;
+    const value = Number(row?.measurement_value);
+    if (!Number.isFinite(value)) return;
+    const date = row?.measurement_time || row?.created_at;
+    const ts = Date.parse(date || "");
+    if (Number.isNaN(ts)) return;
+    const label = row?.measurement_type || row?.device_type || "Measurement";
+    const key = label.toLowerCase();
+    const current = grouped.get(key) || {
+      key,
+      label,
+      unit: row?.measurement_unit || null,
+      referencePredicted: toFinite(row?.reference_predicted),
+      referencePercent: toFinite(row?.reference_percent),
+      rows: [],
+    };
+    if (!current.unit && row?.measurement_unit) current.unit = row.measurement_unit;
+    if (current.referencePredicted == null && toFinite(row?.reference_predicted) != null) {
+      current.referencePredicted = toFinite(row?.reference_predicted);
+    }
+    if (current.referencePercent == null && toFinite(row?.reference_percent) != null) {
+      current.referencePercent = toFinite(row?.reference_percent);
+    }
+    current.rows.push({ ts, date, value });
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values())
+    .map((series) => {
+      const sorted = series.rows.sort((a, b) => a.ts - b.ts);
+      const points = sorted.map((item) => ({ x: item.ts, y: item.value }));
+      const latest = sorted.length ? sorted[sorted.length - 1].value : null;
+      return {
+        ...series,
+        rows: sorted,
+        points,
+        latest,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function buildSkinSeries(rows) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const allergen = (row?.allergen || "").trim();
+    if (!allergen) return;
+    const date = row?.measurement_time || row?.created_at;
+    const ts = Date.parse(date || "");
+    if (Number.isNaN(ts)) return;
+    const wheal = toFinite(row?.wheal_mm);
+    const flare = toFinite(row?.flare_mm);
+    const control = toFinite(row?.control_wheal_mm);
+    const key = allergen.toLowerCase();
+    const current = grouped.get(key) || {
+      key,
+      label: allergen,
+      rows: [],
+    };
+    current.rows.push({ ts, date, wheal, flare, control });
+    grouped.set(key, current);
+  });
+  return Array.from(grouped.values())
+    .map((series) => {
+      const sorted = series.rows.sort((a, b) => a.ts - b.ts);
+      const points = sorted.filter((item) => item.wheal != null).map((item) => ({ x: item.ts, y: item.wheal }));
+      const latestWhealEntry = [...sorted].reverse().find((item) => item.wheal != null) || null;
+      return {
+        ...series,
+        rows: sorted,
+        points,
+        latestWheal: latestWhealEntry ? latestWhealEntry.wheal : null,
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function toFinite(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function Sparkline({ points, color = "#059669", reference }) {
+  const hasPoints = Array.isArray(points) && points.length > 0;
+  const viewWidth = 100;
+  const viewHeight = 60;
+  if (!hasPoints) {
+    return (
+      <div
+        style={{
+          height: 60,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 12,
+          color: "#9ca3af",
+        }}
+      >
+        No data
+      </div>
+    );
+  }
+  const values = points.map((p) => p.y);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const coords = points.map((point, idx) => {
+    const x = points.length === 1 ? viewWidth / 2 : (idx / (points.length - 1)) * viewWidth;
+    const y = viewHeight - ((point.y - min) / span) * viewHeight;
+    return { x, y };
+  });
+  const band =
+    reference && reference.low != null && reference.high != null
+      ? {
+          low: reference.low,
+          high: reference.high,
+        }
+      : null;
+  let bandTop = null;
+  let bandHeight = null;
+  if (band) {
+    const topValue = Math.min(Math.max(band.high, min), max);
+    const bottomValue = Math.min(Math.max(band.low, min), max);
+    const topY = viewHeight - ((topValue - min) / span) * viewHeight;
+    const bottomY = viewHeight - ((bottomValue - min) / span) * viewHeight;
+    bandTop = Math.min(topY, bottomY);
+    bandHeight = Math.abs(bottomY - topY) || 2;
+  }
+  const path = coords.map((coord, idx) => `${idx === 0 ? "M" : "L"}${coord.x},${coord.y}`).join(" ");
+  return (
+    <svg
+      viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+      preserveAspectRatio="none"
+      style={{ width: "100%", height: 70, marginTop: 6 }}
+    >
+      {band && bandTop != null && bandHeight != null && (
+        <rect x={0} y={bandTop} width={viewWidth} height={bandHeight} fill="#d1fae5" opacity={0.6} />
+      )}
+      <path d={`M0,${viewHeight} L${viewWidth},${viewHeight}`} stroke="#e5e7eb" strokeWidth={1} fill="none" />
+      <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      {coords.map((coord, idx) => (
+        <circle key={idx} cx={coord.x} cy={coord.y} r={1.6} fill={color} />
+      ))}
+    </svg>
+  );
+}
+
+function formatNumber(value, digits = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const fixed = num.toFixed(digits);
+  if (digits === 0) return fixed;
+  return fixed.replace(/\.0+$/, "").replace(/(\.\d*?[1-9])0+$/, "$1");
+}
+
+function formatDateShort(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 // Skeleton row for loading state
 function SkeletonRow() {
   const shimmer = {
@@ -1093,6 +1698,19 @@ const tabs = { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 };
 const tabBtn = { padding: "6px 10px", borderRadius: 999, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
 const tabBtnActive = { border: "1px solid #111827", background: "#111827", color: "#fff" };
 const btn = { padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const seriesGrid = { display: "grid", gap: 12 };
+const clinicalCard = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  padding: 10,
+  background: "#f9fafb",
+};
+const historyList = { marginTop: 8, display: "grid", gap: 4, fontSize: 12, color: "#111827" };
+const historyRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  fontVariantNumeric: "tabular-nums",
+};
 
 // Backdrop so the panel scrolls, not the page
 const backdrop = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.15)", zIndex: 999 };
