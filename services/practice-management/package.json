@@ -1,0 +1,16 @@
+{
+  "name": "practice-management",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "tsc --noEmit",
+    "test": "npm run build --silent && node scripts/run-tests.js $@",
+    "generate:schema": "node scripts/generate-schema.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
