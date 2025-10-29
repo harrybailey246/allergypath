@@ -18,6 +18,53 @@ const STATUS_TABS = [
 
 const PAGE_SIZE = 50;
 
+const PRE_AUTH_STATUS_OPTIONS = [
+  { value: "not_requested", label: "Not requested" },
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "pending", label: "Pending review" },
+  { value: "needs_info", label: "Needs info" },
+  { value: "approved", label: "Approved" },
+  { value: "denied", label: "Denied" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const PRE_AUTH_REQUEST_TYPES = [
+  { value: "initial", label: "Initial request" },
+  { value: "continuation", label: "Continuation" },
+  { value: "appeal", label: "Appeal" },
+  { value: "retroactive", label: "Retroactive" },
+  { value: "other", label: "Other" },
+];
+
+const PRE_AUTH_REQUEST_STATUS_OPTIONS = [
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "denied", label: "Denied" },
+  { value: "needs_info", label: "Needs info" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+const NOTE_TEMPLATES = [
+  {
+    key: "initial_pre_auth",
+    label: "Initial pre-auth summary",
+    body: `Patient: {{patient_name}} (DOB: {{patient_dob}})\nPayer: {{payer_name}}\nPolicy: {{policy_number}}\nStatus: {{pre_auth_status}}\n\nClinical summary:\n{{clinician_notes}}\n\nRequested treatment:\n{{request_summary}}`,
+  },
+  {
+    key: "appeal_follow_up",
+    label: "Appeal follow-up",
+    body: `Following up on pre-authorisation reference {{latest_payer_reference}} for {{patient_name}}.\nCurrent status: {{latest_pre_auth_status}}.\nPayer response: {{response_notes}}.\n\nAdditional clinical justification:\n{{clinician_notes}}`,
+  },
+  {
+    key: "approval_confirmation",
+    label: "Approval confirmation",
+    body: `Payer {{payer_name}} has approved pre-authorisation reference {{latest_payer_reference}} for {{patient_name}}.\nDecision received: {{response_received_at}}.\nAuthorisation notes:\n{{response_notes}}`,
+  },
+];
+
 export default function Dashboard({
   isAdmin,
   onOpenAdminSettings,
@@ -200,6 +247,7 @@ export default function Dashboard({
     let query = supabase
       .from("submissions")
       .select(
+        "id,created_at,first_name,surname,email,flags,spt_ready,high_risk,status,symptoms,food_triggers,clinician_notes,attachments,clinician_id,clinician_email,payer_name,payer_reference,payer_phone,payer_email,policy_holder,policy_number,policy_group,policy_effective_date,policy_expiration_date,pre_auth_status,pre_auth_reference,pre_auth_last_checked",
         "id,created_at,first_name,surname,email,flags,spt_ready,high_risk,status,symptoms,food_triggers,clinician_notes,attachments,clinician_id,clinician_email,guardian_contacts,consent_signed_at,consent_expires_at,safeguarding_notes,safeguarding_follow_up_at,document_references",
         { count: "exact" }
       )
@@ -868,6 +916,378 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
   const attachmentsLoading = attachments.some((path) => attachmentState[path]?.loading);
   const attachmentsErrored = attachments.some((path) => attachmentState[path]?.error);
 
+  const defaultInsurance = React.useMemo(
+    () => ({
+      payer_name: row.payer_name || "",
+      payer_reference: row.payer_reference || "",
+      payer_phone: row.payer_phone || "",
+      payer_email: row.payer_email || "",
+      policy_holder: row.policy_holder || "",
+      policy_number: row.policy_number || "",
+      policy_group: row.policy_group || "",
+      policy_effective_date: row.policy_effective_date || "",
+      policy_expiration_date: row.policy_expiration_date || "",
+      pre_auth_status: row.pre_auth_status || "not_requested",
+      pre_auth_reference: row.pre_auth_reference || "",
+      pre_auth_last_checked: row.pre_auth_last_checked || null,
+    }),
+    [row]
+  );
+
+  const [insurance, setInsurance] = React.useState(defaultInsurance);
+  const [insuranceLoading, setInsuranceLoading] = React.useState(true);
+  const [insuranceDirty, setInsuranceDirty] = React.useState(false);
+  const [savingInsurance, setSavingInsurance] = React.useState(false);
+
+  React.useEffect(() => {
+    setInsurance(defaultInsurance);
+    setInsuranceDirty(false);
+  }, [defaultInsurance]);
+
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      setInsuranceLoading(true);
+      const { data, error } = await supabase
+        .from("submissions")
+        .select(
+          "payer_name,payer_reference,payer_phone,payer_email,policy_holder,policy_number,policy_group,policy_effective_date,policy_expiration_date,pre_auth_status,pre_auth_reference,pre_auth_last_checked"
+        )
+        .eq("id", row.id)
+        .single();
+      if (!active) return;
+      if (!error && data) {
+        setInsurance({
+          payer_name: data.payer_name || "",
+          payer_reference: data.payer_reference || "",
+          payer_phone: data.payer_phone || "",
+          payer_email: data.payer_email || "",
+          policy_holder: data.policy_holder || "",
+          policy_number: data.policy_number || "",
+          policy_group: data.policy_group || "",
+          policy_effective_date: data.policy_effective_date || "",
+          policy_expiration_date: data.policy_expiration_date || "",
+          pre_auth_status: data.pre_auth_status || "not_requested",
+          pre_auth_reference: data.pre_auth_reference || "",
+          pre_auth_last_checked: data.pre_auth_last_checked || null,
+        });
+        setInsuranceDirty(false);
+      }
+      setInsuranceLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [row.id]);
+
+  const updateInsuranceField = React.useCallback((field, value) => {
+    setInsurance((prev) => ({ ...prev, [field]: value }));
+    setInsuranceDirty(true);
+  }, []);
+
+  const markPreAuthChecked = React.useCallback(() => {
+    updateInsuranceField("pre_auth_last_checked", new Date().toISOString());
+  }, [updateInsuranceField]);
+
+  const saveInsurance = React.useCallback(async () => {
+    if (!insurance) return;
+    setSavingInsurance(true);
+    const payload = {
+      payer_name: insurance.payer_name || null,
+      payer_reference: insurance.payer_reference || null,
+      payer_phone: insurance.payer_phone || null,
+      payer_email: insurance.payer_email || null,
+      policy_holder: insurance.policy_holder || null,
+      policy_number: insurance.policy_number || null,
+      policy_group: insurance.policy_group || null,
+      policy_effective_date: insurance.policy_effective_date || null,
+      policy_expiration_date: insurance.policy_expiration_date || null,
+      pre_auth_status: insurance.pre_auth_status || "not_requested",
+      pre_auth_reference: insurance.pre_auth_reference || null,
+      pre_auth_last_checked: insurance.pre_auth_last_checked
+        ? new Date(insurance.pre_auth_last_checked).toISOString()
+        : new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase
+      .from("submissions")
+      .update(payload)
+      .eq("id", row.id);
+    if (error) {
+      alert("Failed to save insurance: " + error.message);
+    } else {
+      setInsuranceDirty(false);
+      showToast?.("success", "Insurance details saved.");
+      onUpdate();
+    }
+    setSavingInsurance(false);
+  }, [insurance, onUpdate, row.id, showToast]);
+
+  const [preAuthRequests, setPreAuthRequests] = React.useState([]);
+  const [preAuthLoading, setPreAuthLoading] = React.useState(true);
+  const [requestEdits, setRequestEdits] = React.useState({});
+  const [savingPreAuth, setSavingPreAuth] = React.useState(false);
+  const [newPreAuth, setNewPreAuth] = React.useState({
+    request_type: "initial",
+    status: "draft",
+    summary: "",
+    body: "",
+    payer_reference: "",
+  });
+
+  const fetchPreAuthRequests = React.useCallback(async () => {
+    setPreAuthLoading(true);
+    const { data, error } = await supabase
+      .from("submission_pre_auth_requests")
+      .select(
+        "id,submission_id,request_type,requested_at,requested_by_email,status,status_notes,request_payload,payer_reference,response_notes,response_received_at,updated_at"
+      )
+      .eq("submission_id", row.id)
+      .order("requested_at", { ascending: false });
+    if (!error) {
+      setPreAuthRequests(data || []);
+    }
+    setPreAuthLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchPreAuthRequests();
+    const ch = supabase
+      .channel(`pre-auth-${row.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "submission_pre_auth_requests",
+          filter: `submission_id=eq.${row.id}`,
+        },
+        fetchPreAuthRequests
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchPreAuthRequests, row.id]);
+
+  React.useEffect(() => {
+    setRequestEdits((prev) => {
+      const next = { ...prev };
+      const ids = new Set(preAuthRequests.map((r) => r.id));
+      Object.keys(next).forEach((id) => {
+        if (!ids.has(id)) delete next[id];
+      });
+      preAuthRequests.forEach((req) => {
+        if (!next[req.id]) {
+          next[req.id] = {
+            status: req.status,
+            status_notes: req.status_notes || "",
+            response_notes: req.response_notes || "",
+            response_received_at: req.response_received_at ? toInputDateTime(req.response_received_at) : "",
+            payer_reference: req.payer_reference || "",
+          };
+        }
+      });
+      return next;
+    });
+  }, [preAuthRequests]);
+
+  const handleRequestEditChange = React.useCallback((id, field, value) => {
+    setRequestEdits((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], [field]: value },
+    }));
+  }, []);
+
+  const saveRequestEdit = React.useCallback(
+    async (request) => {
+      const edit = requestEdits[request.id];
+      if (!edit) return;
+      const payload = {
+        status: edit.status,
+        status_notes: edit.status_notes || null,
+        response_notes: edit.response_notes || null,
+        payer_reference: edit.payer_reference || null,
+        response_received_at: edit.response_received_at
+          ? new Date(edit.response_received_at).toISOString()
+          : null,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase
+        .from("submission_pre_auth_requests")
+        .update(payload)
+        .eq("id", request.id);
+      if (error) {
+        alert("Failed to update pre-auth request: " + error.message);
+      } else {
+        fetchPreAuthRequests();
+        showToast?.("success", "Pre-auth request updated.");
+      }
+    },
+    [fetchPreAuthRequests, requestEdits, showToast]
+  );
+
+  const resetNewPreAuth = React.useCallback(() => {
+    setNewPreAuth({
+      request_type: "initial",
+      status: "draft",
+      summary: "",
+      body: "",
+      payer_reference: "",
+    });
+  }, []);
+
+  const saveNewPreAuth = React.useCallback(async () => {
+    if (savingPreAuth) return;
+    setSavingPreAuth(true);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user || null;
+    const insert = {
+      submission_id: row.id,
+      request_type: newPreAuth.request_type,
+      status: newPreAuth.status,
+      status_notes: newPreAuth.summary || null,
+      request_payload: newPreAuth.body ? { body: newPreAuth.body } : null,
+      payer_reference: newPreAuth.payer_reference || null,
+      requested_by: user?.id ?? null,
+      requested_by_email: user?.email ?? null,
+    };
+    const { error } = await supabase.from("submission_pre_auth_requests").insert([insert]);
+    if (error) {
+      alert("Failed to log pre-auth request: " + error.message);
+    } else {
+      resetNewPreAuth();
+      fetchPreAuthRequests();
+      showToast?.("success", "Pre-auth request logged.");
+    }
+    setSavingPreAuth(false);
+  }, [fetchPreAuthRequests, newPreAuth, resetNewPreAuth, row.id, savingPreAuth, showToast]);
+
+  const [claimNotes, setClaimNotes] = React.useState([]);
+  const [claimNotesLoading, setClaimNotesLoading] = React.useState(true);
+  const [claimNoteDraft, setClaimNoteDraft] = React.useState("");
+  const [selectedTemplateKey, setSelectedTemplateKey] = React.useState("");
+  const [savingClaimNote, setSavingClaimNote] = React.useState(false);
+
+  const fetchClaimNotes = React.useCallback(async () => {
+    setClaimNotesLoading(true);
+    const { data, error } = await supabase
+      .from("submission_claim_notes")
+      .select("id,note,template_key,created_at,author_email")
+      .eq("submission_id", row.id)
+      .order("created_at", { ascending: false });
+    if (!error) setClaimNotes(data || []);
+    setClaimNotesLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchClaimNotes();
+    const ch = supabase
+      .channel(`claim-notes-${row.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "submission_claim_notes",
+          filter: `submission_id=eq.${row.id}`,
+        },
+        fetchClaimNotes
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchClaimNotes, row.id]);
+
+  const applyTemplateToDraft = React.useCallback(
+    (templateKey) => {
+      const template = NOTE_TEMPLATES.find((t) => t.key === templateKey);
+      if (!template) return;
+      setClaimNoteDraft(
+        renderTemplate(
+          template.body,
+          buildTemplateContext({ row, insurance, notes, preAuthRequests, draft: newPreAuth })
+        )
+      );
+    },
+    [insurance, newPreAuth, notes, preAuthRequests, row]
+  );
+
+  const handleTemplateSelect = React.useCallback(
+    (key) => {
+      setSelectedTemplateKey(key);
+      if (key) applyTemplateToDraft(key);
+    },
+    [applyTemplateToDraft]
+  );
+
+  const reapplyTemplate = React.useCallback(() => {
+    if (selectedTemplateKey) applyTemplateToDraft(selectedTemplateKey);
+  }, [applyTemplateToDraft, selectedTemplateKey]);
+
+  const saveClaimNote = React.useCallback(async () => {
+    if (!claimNoteDraft.trim()) return;
+    setSavingClaimNote(true);
+    const { data: authData } = await supabase.auth.getUser();
+    const user = authData?.user || null;
+    const insert = {
+      submission_id: row.id,
+      note: claimNoteDraft.trim(),
+      template_key: selectedTemplateKey || null,
+      author_id: user?.id ?? null,
+      author_email: user?.email ?? null,
+    };
+    const { error } = await supabase.from("submission_claim_notes").insert([insert]);
+    if (error) {
+      alert("Failed to save claim note: " + error.message);
+    } else {
+      setClaimNoteDraft("");
+      setSelectedTemplateKey("");
+      fetchClaimNotes();
+      showToast?.("success", "Claim note saved.");
+    }
+    setSavingClaimNote(false);
+  }, [claimNoteDraft, fetchClaimNotes, row.id, selectedTemplateKey, showToast]);
+
+  const [healthcodeExports, setHealthcodeExports] = React.useState([]);
+  const [healthcodeLoading, setHealthcodeLoading] = React.useState(true);
+
+  const fetchHealthcodeExports = React.useCallback(async () => {
+    setHealthcodeLoading(true);
+    const { data, error } = await supabase
+      .from("submission_healthcode_exports")
+      .select(
+        "id,batch_id,export_status,exported_at,response,audit_reference,error,healthcode_export_batches(status,exported_at,audit_signed_url,submission_count)"
+      )
+      .eq("submission_id", row.id)
+      .order("exported_at", { ascending: false });
+    if (!error) setHealthcodeExports(data || []);
+    setHealthcodeLoading(false);
+  }, [row.id]);
+
+  React.useEffect(() => {
+    fetchHealthcodeExports();
+    const ch = supabase
+      .channel(`healthcode-exports-${row.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "submission_healthcode_exports",
+          filter: `submission_id=eq.${row.id}`,
+        },
+        fetchHealthcodeExports
+      )
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchHealthcodeExports, row.id]);
+
+  const markResponseNow = React.useCallback(
+    (id) => {
+      handleRequestEditChange(id, "response_received_at", toInputDateTime(new Date().toISOString()));
+    },
+    [handleRequestEditChange]
+  );
+
+  // scheduling state + loaders
   const guardians = React.useMemo(
     () => (Array.isArray(localRow.guardian_contacts) ? localRow.guardian_contacts : []),
     [localRow.guardian_contacts]
@@ -1467,6 +1887,427 @@ function DetailPanel({ row, notes, setNotes, onClose, onUpdate, notifyStatusUpda
         )}
       </div>
 
+      <h4>Insurance & payer</h4>
+      {insuranceLoading ? (
+        <p style={{ color: "#6b7280" }}>Loading payer profile…</p>
+      ) : (
+        <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12, display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Payer name</Label>
+              <input
+                value={insurance.payer_name}
+                onChange={(e) => updateInsuranceField("payer_name", e.target.value)}
+                placeholder="Allianz, Bupa, AXA…"
+                style={input}
+              />
+            </div>
+            <div>
+              <Label>Payer phone</Label>
+              <input
+                value={insurance.payer_phone}
+                onChange={(e) => updateInsuranceField("payer_phone", e.target.value)}
+                placeholder="Customer service line"
+                style={input}
+              />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Payer email</Label>
+              <input
+                value={insurance.payer_email}
+                onChange={(e) => updateInsuranceField("payer_email", e.target.value)}
+                placeholder="claims@example.com"
+                style={input}
+              />
+            </div>
+            <div>
+              <Label>Payer reference</Label>
+              <input
+                value={insurance.payer_reference}
+                onChange={(e) => updateInsuranceField("payer_reference", e.target.value)}
+                placeholder="Account or portal reference"
+                style={input}
+              />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Policy holder</Label>
+              <input
+                value={insurance.policy_holder}
+                onChange={(e) => updateInsuranceField("policy_holder", e.target.value)}
+                placeholder="Parent / guardian"
+                style={input}
+              />
+            </div>
+            <div>
+              <Label>Policy number</Label>
+              <input
+                value={insurance.policy_number}
+                onChange={(e) => updateInsuranceField("policy_number", e.target.value)}
+                placeholder="Policy number"
+                style={input}
+              />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Policy group</Label>
+              <input
+                value={insurance.policy_group}
+                onChange={(e) => updateInsuranceField("policy_group", e.target.value)}
+                placeholder="Employer / plan group"
+                style={input}
+              />
+            </div>
+            <div>
+              <Label>Pre-auth reference</Label>
+              <input
+                value={insurance.pre_auth_reference}
+                onChange={(e) => updateInsuranceField("pre_auth_reference", e.target.value)}
+                placeholder="Authorisation ref"
+                style={input}
+              />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Policy effective date</Label>
+              <input
+                type="date"
+                value={insurance.policy_effective_date || ""}
+                onChange={(e) => updateInsuranceField("policy_effective_date", e.target.value)}
+                style={input}
+              />
+            </div>
+            <div>
+              <Label>Policy expiry</Label>
+              <input
+                type="date"
+                value={insurance.policy_expiration_date || ""}
+                onChange={(e) => updateInsuranceField("policy_expiration_date", e.target.value)}
+                style={input}
+              />
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <div>
+              <Label>Pre-authorisation status</Label>
+              <select
+                value={insurance.pre_auth_status}
+                onChange={(e) => updateInsuranceField("pre_auth_status", e.target.value)}
+                style={{ ...input, appearance: "auto" }}
+              >
+                {PRE_AUTH_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>
+                Last checked: {insurance.pre_auth_last_checked ? formatDateTime(insurance.pre_auth_last_checked) : "Never"}
+              </span>
+              <button onClick={markPreAuthChecked} style={{ ...btn, padding: "4px 8px" }}>Mark reviewed</button>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button
+              onClick={saveInsurance}
+              style={btn}
+              disabled={!insuranceDirty || savingInsurance}
+            >
+              {savingInsurance ? "Saving…" : "Save payer details"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <h4>Pre-authorisation requests</h4>
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+            <div>
+              <Label>Request type</Label>
+              <select
+                value={newPreAuth.request_type}
+                onChange={(e) => setNewPreAuth((prev) => ({ ...prev, request_type: e.target.value }))}
+                style={{ ...input, appearance: "auto" }}
+              >
+                {PRE_AUTH_REQUEST_TYPES.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <select
+                value={newPreAuth.status}
+                onChange={(e) => setNewPreAuth((prev) => ({ ...prev, status: e.target.value }))}
+                style={{ ...input, appearance: "auto" }}
+              >
+                {PRE_AUTH_REQUEST_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <Label>Payer reference</Label>
+            <input
+              value={newPreAuth.payer_reference}
+              onChange={(e) => setNewPreAuth((prev) => ({ ...prev, payer_reference: e.target.value }))}
+              placeholder="Reference supplied to payer"
+              style={input}
+            />
+          </div>
+          <div>
+            <Label>Summary</Label>
+            <textarea
+              value={newPreAuth.summary}
+              onChange={(e) => setNewPreAuth((prev) => ({ ...prev, summary: e.target.value }))}
+              placeholder="Clinical summary sent to payer"
+              style={{ ...input, minHeight: 70 }}
+            />
+          </div>
+          <div>
+            <Label>Request body</Label>
+            <textarea
+              value={newPreAuth.body}
+              onChange={(e) => setNewPreAuth((prev) => ({ ...prev, body: e.target.value }))}
+              placeholder="Exact wording or upload summary of request"
+              style={{ ...input, minHeight: 90 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={saveNewPreAuth} style={btn} disabled={savingPreAuth}>
+              {savingPreAuth ? "Saving…" : "Log pre-auth request"}
+            </button>
+            <button onClick={resetNewPreAuth} style={btn} type="button">
+              Reset
+            </button>
+          </div>
+        </div>
+        {preAuthLoading ? (
+          <p style={{ color: "#6b7280" }}>Loading request history…</p>
+        ) : preAuthRequests.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No pre-authorisation activity yet.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {preAuthRequests.map((request) => {
+              const edit = requestEdits[request.id] || {
+                status: request.status,
+                status_notes: request.status_notes || "",
+                response_notes: request.response_notes || "",
+                response_received_at: request.response_received_at
+                  ? toInputDateTime(request.response_received_at)
+                  : "",
+                payer_reference: request.payer_reference || "",
+              };
+              const requestBody = request.request_payload && typeof request.request_payload === "object"
+                ? request.request_payload.body || null
+                : null;
+              return (
+                <div key={request.id} style={{ border: "1px solid #f3f4f6", borderRadius: 8, padding: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#6b7280" }}>
+                    <span>
+                      {request.request_type.toUpperCase()} • Logged {formatDateTime(request.requested_at) || "—"}
+                    </span>
+                    <span>{request.requested_by_email || "Unknown"}</span>
+                  </div>
+                  {request.status_notes && <div style={{ marginTop: 6 }}>{request.status_notes}</div>}
+                  {requestBody && (
+                    <pre
+                      style={{
+                        marginTop: 8,
+                        background: "#f9fafb",
+                        padding: 8,
+                        borderRadius: 6,
+                        whiteSpace: "pre-wrap",
+                      }}
+                    >
+                      {requestBody}
+                    </pre>
+                  )}
+                  <div style={{ display: "grid", gap: 8, marginTop: 10, gridTemplateColumns: "1fr 1fr" }}>
+                    <div>
+                      <Label>Status</Label>
+                      <select
+                        value={edit.status}
+                        onChange={(e) => handleRequestEditChange(request.id, "status", e.target.value)}
+                        style={{ ...input, appearance: "auto" }}
+                      >
+                        {PRE_AUTH_REQUEST_STATUS_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Payer reference</Label>
+                      <input
+                        value={edit.payer_reference}
+                        onChange={(e) => handleRequestEditChange(request.id, "payer_reference", e.target.value)}
+                        placeholder="Reference from payer"
+                        style={input}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Label>Status notes</Label>
+                    <textarea
+                      value={edit.status_notes}
+                      onChange={(e) => handleRequestEditChange(request.id, "status_notes", e.target.value)}
+                      style={{ ...input, minHeight: 60 }}
+                    />
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    <Label>Payer response</Label>
+                    <textarea
+                      value={edit.response_notes}
+                      onChange={(e) => handleRequestEditChange(request.id, "response_notes", e.target.value)}
+                      placeholder="Decision, outstanding info, etc."
+                      style={{ ...input, minHeight: 60 }}
+                    />
+                  </div>
+                  <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "1fr auto" }}>
+                    <div>
+                      <Label>Response received</Label>
+                      <input
+                        type="datetime-local"
+                        value={edit.response_received_at}
+                        onChange={(e) => handleRequestEditChange(request.id, "response_received_at", e.target.value)}
+                        style={input}
+                      />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                      <button onClick={() => markResponseNow(request.id)} style={btn}>Now</button>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
+                    <button onClick={() => saveRequestEdit(request)} style={btn}>
+                      Save update
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <h4>Claim notes & templates</h4>
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div>
+            <Label>Template</Label>
+            <select
+              value={selectedTemplateKey}
+              onChange={(e) => handleTemplateSelect(e.target.value)}
+              style={{ ...input, appearance: "auto" }}
+            >
+              <option value="">Select a template…</option>
+              {NOTE_TEMPLATES.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Generated note</Label>
+            <textarea
+              value={claimNoteDraft}
+              onChange={(e) => setClaimNoteDraft(e.target.value)}
+              placeholder="Compose claim correspondence"
+              style={{ ...input, minHeight: 120 }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={reapplyTemplate} style={btn} disabled={!selectedTemplateKey}>
+              Reapply template
+            </button>
+            <button onClick={saveClaimNote} style={btn} disabled={!claimNoteDraft.trim() || savingClaimNote}>
+              {savingClaimNote ? "Saving…" : "Save claim note"}
+            </button>
+          </div>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          {claimNotesLoading ? (
+            <p style={{ color: "#6b7280" }}>Loading claim notes…</p>
+          ) : claimNotes.length === 0 ? (
+            <div style={{ color: "#6b7280" }}>No claim notes recorded yet.</div>
+          ) : (
+            claimNotes.map((note) => {
+              const templateLabel = NOTE_TEMPLATES.find((t) => t.key === note.template_key)?.label || note.template_key;
+              return (
+                <div key={note.id} style={{ padding: "8px 0", borderBottom: "1px solid #f3f4f6" }}>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    {note.author_email || "Unknown"} • {formatDateTime(note.created_at) || "—"}
+                    {templateLabel && (
+                      <span style={{ marginLeft: 6, color: "#2563eb" }}>Template: {templateLabel}</span>
+                    )}
+                  </div>
+                  <pre style={{ whiteSpace: "pre-wrap", margin: "6px 0 0" }}>{note.note}</pre>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <h4>Healthcode export history</h4>
+      <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        {healthcodeLoading ? (
+          <p style={{ color: "#6b7280" }}>Loading export history…</p>
+        ) : healthcodeExports.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>This submission has not been exported yet.</div>
+        ) : (
+          healthcodeExports.map((entry) => {
+            const batch = entry.healthcode_export_batches || {};
+            const batchPrefix = entry.batch_id ? entry.batch_id.slice(0, 8) : "—";
+            const exportStatus = entry.export_status ? entry.export_status.toUpperCase() : "UNKNOWN";
+            return (
+              <div key={entry.id} style={{ padding: "8px 0", borderBottom: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  Batch {batchPrefix} • {exportStatus} • {formatDateTime(entry.exported_at) || "—"}
+                </div>
+                {batch.status && (
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                    Batch status: {batch.status} ({batch.submission_count || 0} submissions)
+                  </div>
+                )}
+                {entry.error && (
+                  <div style={{ color: "#b91c1c", marginTop: 4 }}>Error: {entry.error}</div>
+                )}
+                {entry.response && (
+                  <pre style={{ whiteSpace: "pre-wrap", marginTop: 6, background: "#f9fafb", padding: 8, borderRadius: 6 }}>
+                    {JSON.stringify(entry.response, null, 2)}
+                  </pre>
+                )}
+                {batch.audit_signed_url && (
+                  <div style={{ marginTop: 6 }}>
+                    <a href={batch.audit_signed_url} target="_blank" rel="noopener noreferrer">
+                      Download audit file
+                    </a>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Notes */}
+      <h4>Internal clinician notes</h4>
       <h4>Clinician Notes</h4>
       <textarea
         value={notes}
@@ -1672,6 +2513,52 @@ const panel = {
   zIndex: 1000,
 };
 
+function buildTemplateContext({ row, insurance, notes, preAuthRequests, draft }) {
+  const latest = Array.isArray(preAuthRequests) && preAuthRequests.length > 0 ? preAuthRequests[0] : null;
+  const patientName = `${row.first_name || ""} ${row.surname || ""}`.trim() || row.email || "Patient";
+  const draftSummary = draft?.summary || "";
+  const draftReference = draft?.payer_reference || "";
+  return {
+    patient_name: patientName,
+    patient_email: row.email || "",
+    patient_dob: row.date_of_birth || row.dob || "",
+    payer_name: insurance?.payer_name || "",
+    policy_number: insurance?.policy_number || "",
+    policy_holder: insurance?.policy_holder || "",
+    policy_group: insurance?.policy_group || "",
+    pre_auth_status: insurance?.pre_auth_status || "not_requested",
+    request_summary: draftSummary || latest?.status_notes || "",
+    clinician_notes: notes || row.clinician_notes || "",
+    latest_payer_reference: draftReference || latest?.payer_reference || insurance?.pre_auth_reference || "",
+    latest_pre_auth_status: latest?.status || "",
+    response_notes: latest?.response_notes || "",
+    response_received_at: latest?.response_received_at ? formatDateTime(latest.response_received_at) : "",
+  };
+}
+
+function renderTemplate(body, context) {
+  if (!body) return "";
+  return body.replace(/{{(.*?)}}/g, (_, key) => {
+    const value = context[String(key).trim()];
+    return value == null ? "" : String(value);
+  });
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  try {
+    return format(new Date(value), "d MMM yyyy HH:mm");
+  } catch (_err) {
+    return value;
+  }
+}
+
+function toInputDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (v) => String(v).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 function toLocalInput(value) {
   if (!value) return "";
   const date = new Date(value);
