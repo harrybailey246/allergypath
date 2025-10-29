@@ -1,35 +1,46 @@
 {
-  "name": "@allergypath/practice-management",
+  "name": "practice-management",
   "version": "0.1.0",
-  "private": true,
-  "main": "dist/main.js",
+  "description": "NestJS service for practice management integrating with Prisma and PostgreSQL.",
   "license": "MIT",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "lint": "tsc --noEmit",
-    "test": "jest",
-    "generate:schema": "ts-node scripts/generate-schema.ts"
+    "build": "nest build",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "lint": "eslint \"{src,prisma}/**/*.ts\" --fix",
+    "start": "node dist/main",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
-    "@nestjs/apollo": "^12.2.2",
-    "@nestjs/common": "^10.3.8",
-    "@nestjs/core": "^10.3.8",
-    "@nestjs/graphql": "^12.2.2",
-    "@nestjs/platform-express": "^10.3.8",
-    "apollo-server-express": "^3.13.0",
-    "class-transformer": "^0.5.1",
-    "class-validator": "^0.14.1",
-    "graphql": "^16.8.1",
-    "reflect-metadata": "^0.1.13",
+    "@nestjs/common": "^10.0.0",
+    "@nestjs/core": "^10.0.0",
+    "@nestjs/platform-express": "^10.0.0",
+    "@prisma/client": "^5.15.0",
+    "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
-    "@nestjs/testing": "^10.3.8",
-    "@types/jest": "^29.5.12",
-    "@types/node": "^20.12.12",
-    "jest": "^29.7.0",
-    "ts-jest": "^29.2.5",
+    "@nestjs/cli": "^10.3.2",
+    "@nestjs/schematics": "^10.0.2",
+    "@nestjs/testing": "^10.0.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.30",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-prettier": "^5.1.3",
+    "prettier": "^3.2.5",
+    "prisma": "^5.15.0",
+    "source-map-support": "^0.5.21",
+    "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.4.3"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

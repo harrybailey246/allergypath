@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentResourceType {
+  IN_PERSON
+  TELEHEALTH
+  HOME_VISIT
+}
+
+model Patient {
+  id             String                 @id @default(uuid())
+  legacyId       String?                @unique
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  appointments   Appointment[]
+  requests       AppointmentRequest[]
+  partnerCheckIns PartnerCheckIn[]
+}
+
+model Clinician {
+  id           String        @id @default(uuid())
+  legacyId     String?       @unique
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+  requests     AppointmentRequest[]
+}
+
+model Location {
+  id                 String                @id @default(uuid())
+  legacyId           String?               @unique
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  appointments       Appointment[]
+  appointmentRequests AppointmentRequest[]
+  partnerCheckIns    PartnerCheckIn[]
+  partnerLabelJobs   PartnerLabelJob[]
+  partnerStockLevels PartnerStockLevel[]
+  temperatureLogs    PartnerTemperatureLog[]
+}
+
+model Appointment {
+  id             String              @id @default(uuid())
+  patientId      String
+  clinicianId    String
+  locationId     String
+  status         AppointmentStatus   @default(REQUESTED)
+  resourceType   AppointmentResourceType
+  startTime      DateTime
+  endTime        DateTime
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  patient   Patient   @relation(fields: [patientId], references: [id])
+  clinician Clinician @relation(fields: [clinicianId], references: [id])
+  location  Location  @relation(fields: [locationId], references: [id])
+
+  @@index([locationId, startTime], map: "idx_appointment_location_start")
+  @@index([clinicianId, startTime], map: "idx_appointment_clinician_start")
+  @@index([patientId, startTime], map: "idx_appointment_patient_start")
+}
+
+model AppointmentRequest {
+  id                 String              @id @default(uuid())
+  patientId          String
+  preferredClinician String?
+  preferredLocation  String?
+  reason             String?
+  requestedAt        DateTime            @default(now())
+  status             AppointmentStatus   @default(REQUESTED)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  patient   Patient   @relation(fields: [patientId], references: [id])
+  clinician Clinician? @relation("PreferredClinician", fields: [preferredClinician], references: [id])
+  location  Location?  @relation("PreferredLocation", fields: [preferredLocation], references: [id])
+
+  @@index([patientId, requestedAt], map: "idx_request_patient_requested_at")
+}
+
+model PartnerCheckIn {
+  id            String   @id @default(uuid())
+  patientId     String
+  locationId    String
+  appointmentId String?
+  checkedInAt   DateTime @default(now())
+  kioskId       String?
+  notes         String?
+
+  patient     Patient    @relation(fields: [patientId], references: [id])
+  location    Location   @relation(fields: [locationId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+
+  @@index([locationId, checkedInAt], map: "idx_checkin_location_time")
+}
+
+model PartnerLabelJob {
+  id           String   @id @default(uuid())
+  locationId   String
+  requestedBy  String?
+  jobType      String
+  status       String   @default("pending")
+  payload      Json
+  requestedAt  DateTime @default(now())
+  completedAt  DateTime?
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId, requestedAt], map: "idx_label_job_location_requested")
+}
+
+model PartnerStockLevel {
+  id             String   @id @default(uuid())
+  locationId     String
+  sku            String
+  quantityOnHand Int
+  reorderPoint   Int?
+  updatedAt      DateTime @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@unique([locationId, sku], map: "uq_stock_location_sku")
+}
+
+model PartnerTemperatureLog {
+  id          String   @id @default(uuid())
+  locationId  String
+  deviceId    String
+  recordedAt  DateTime @default(now())
+  temperature Float
+  unit        String   @default("C")
+  notes       String?
+
+  location Location @relation(fields: [locationId], references: [id])
+
+  @@index([locationId, recordedAt], map: "idx_temperature_location_recorded")
+}
