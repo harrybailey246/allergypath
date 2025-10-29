@@ -1,0 +1,47 @@
+name: Practice Management Service
+
+on:
+  push:
+    paths:
+      - 'services/practice-management/**'
+      - '.github/workflows/practice-management-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    paths:
+      - 'services/practice-management/**'
+      - '.github/workflows/practice-management-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Lint practice-management service
+        run: npm run lint --workspace practice-management
+
+      - name: Run unit tests
+        run: npm test --workspace practice-management -- --runInBand
+
+      - name: Generate GraphQL schema artifact
+        run: npm run generate:schema --workspace practice-management
+
+      - name: Upload GraphQL schema
+        uses: actions/upload-artifact@v4
+        with:
+          name: practice-management-schema
+          path: services/practice-management/generated/schema.gql
