@@ -8,6 +8,8 @@ export default function AdminAnalytics({ onBack }) {
   const [weekly, setWeekly] = React.useState([]);
   const [triggers, setTriggers] = React.useState([]);
   const [symptoms, setSymptoms] = React.useState([]);
+  const [compliance, setCompliance] = React.useState([]);
+  const [auditSummary, setAuditSummary] = React.useState([]);
   const [labOrders, setLabOrders] = React.useState([]);
 
   // NEW: TAT / TTFR KPIs from analytics_tat_30d
@@ -30,6 +32,8 @@ export default function AdminAnalytics({ onBack }) {
         { data: tg, error: e4 },
         { data: sy, error: e5 },
         { data: tat30, error: e6 },
+        { data: comp, error: e7 },
+        { data: audit, error: e8 },
         { data: lab, error: e7 },
       ] = await Promise.all([
         supabase.from("analytics_status_counts").select("*"),
@@ -38,6 +42,14 @@ export default function AdminAnalytics({ onBack }) {
         supabase.from("analytics_top_triggers").select("*"),
         supabase.from("analytics_top_symptoms").select("*"),
         supabase.from("analytics_tat_30d").select("*").maybeSingle(), // ← includes TTFR columns
+        supabase.from("analytics_emergency_compliance").select("*"),
+        supabase
+          .from("analytics_audit_event_summary")
+          .select("*")
+          .order("last_occurred_at", { ascending: false }),
+      ]);
+
+      const firstErr = e1 || e2 || e3 || e4 || e5 || e6 || e7 || e8;
         supabase
           .from("lab_orders")
           .select(
@@ -56,6 +68,8 @@ export default function AdminAnalytics({ onBack }) {
       setTriggers(tg || []);
       setSymptoms(sy || []);
       setKpi(tat30 || null);
+      setCompliance(comp || []);
+      setAuditSummary(audit || []);
       setLabOrders(lab || []);
     } catch (e) {
       setErr(e.message || "Failed to load analytics");
@@ -72,6 +86,23 @@ export default function AdminAnalytics({ onBack }) {
   const maxWeekly = weekly.reduce((m, r) => Math.max(m, r.count || 0), 0);
   const maxTriggers = triggers.reduce((m, r) => Math.max(m, r.count || 0), 0);
   const maxSymptoms = symptoms.reduce((m, r) => Math.max(m, r.count || 0), 0);
+  const complianceWithRate = compliance.filter((row) => row.compliance_rate != null);
+  const complianceAverage =
+    complianceWithRate.length > 0
+      ? Math.round(
+          (complianceWithRate.reduce((sum, row) => sum + Number(row.compliance_rate || 0), 0) /
+            complianceWithRate.length) *
+            10
+        ) / 10
+      : null;
+  const overdueChecks = compliance.filter((row) => row.is_overdue);
+  const soon = new Date();
+  soon.setDate(soon.getDate() + 30);
+  const upcomingDue = compliance.filter((row) => {
+    if (!row.next_due_on || row.is_overdue) return false;
+    const dueDate = new Date(row.next_due_on);
+    return !isNaN(dueDate) && dueDate <= soon;
+  });
   const maxTatP90 = labTatTrend.reduce((m, r) => Math.max(m, r.p90Minutes || 0), 0);
 
   return (
@@ -100,6 +131,109 @@ export default function AdminAnalytics({ onBack }) {
           <Big>{readiness?.high_risk_count ?? "—"}</Big>
         </Card>
       </div>
+
+      <Card title="Emergency checklist compliance" style={{ marginTop: 12 }}>
+        {compliance.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No emergency checklist data yet.</div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+              Overall compliance: {complianceAverage != null ? `${complianceAverage}%` : "—"}
+            </div>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Checklist</th>
+                  <th style={th}>Compliance</th>
+                  <th style={th}>Last completed</th>
+                  <th style={th}>Next due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compliance.map((row) => (
+                  <tr key={row.checklist_type}>
+                    <td style={td}>{row.checklist_type.replace(/_/g, " ")}</td>
+                    <td style={td}>{row.compliance_rate != null ? `${row.compliance_rate}%` : "—"}</td>
+                    <td style={td}>{shortDate(row.last_performed_on)}</td>
+                    <td style={td}>
+                      {row.next_due_on ? shortDate(row.next_due_on) : "overdue"}
+                      {row.is_overdue && <span style={{ color: "#b91c1c", marginLeft: 6 }}>⚠</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <div style={grid2}>
+        <Card title="Overdue checks" style={{ marginTop: 12 }}>
+          {overdueChecks.length === 0 ? (
+            <div style={{ color: "#16a34a" }}>All checks are in date ✅</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {overdueChecks.map((row) => (
+                <li key={row.checklist_type} style={{ marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>{row.checklist_type.replace(/_/g, " ")}</div>
+                  <div style={{ fontSize: 12, color: "#b91c1c" }}>
+                    Overdue since {shortDate(row.next_due_on)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Upcoming within 30 days" style={{ marginTop: 12 }}>
+          {upcomingDue.length === 0 ? (
+            <div style={{ color: "#6b7280" }}>No upcoming deadlines.</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {upcomingDue.map((row) => (
+                <li key={row.checklist_type} style={{ marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>{row.checklist_type.replace(/_/g, " ")}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Due {shortDate(row.next_due_on)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Drill coverage" style={{ marginTop: 12 }}>
+        {auditSummary.length === 0 ? (
+          <div style={{ color: "#6b7280" }}>No audit events recorded.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {auditSummary.map((row) => (
+              <div
+                key={row.event_type}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 8,
+                  alignItems: "center",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600, textTransform: "capitalize" }}>
+                    {row.event_type.replace(/_/g, " ")}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>
+                    Last recorded {shortDate(row.last_occurred_at)}
+                  </div>
+                </div>
+                <div style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>
+                  {row.event_count}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
 
       {/* Turnaround & First Response KPIs (last 30d) */}
       <Card title="Turnaround & First Response – last 30 days" style={{ marginTop: 12 }}>
@@ -406,6 +540,14 @@ function humanizeMinutes(m) {
   const remH = hours % 24;
   return `${days}d ${remH}h`;
 }
+function shortDate(value) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleDateString("en-GB", { dateStyle: "medium" });
+  } catch (err) {
+    return value;
+  }
+}
 function numOrNa(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -485,3 +627,6 @@ const wrap = { maxWidth: 1000, margin: "24px auto", fontFamily: "system-ui, sans
 const grid3 = { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 };
 const grid2 = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 };
 const btn = { padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const table = { width: "100%", borderCollapse: "collapse", fontSize: 12 };
+const th = { textAlign: "left", borderBottom: "1px solid #e5e7eb", padding: "6px 4px", fontWeight: 600 };
+const td = { borderBottom: "1px solid #f3f4f6", padding: "6px 4px" };

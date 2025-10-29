@@ -22,6 +22,7 @@ export default function Dashboard({
   isAdmin,
   onOpenAdminSettings,
   onOpenAnalytics,
+  onOpenAudit,
   onOpenPartner,
   onOpenSchedule,
 }) {
@@ -493,6 +494,11 @@ export default function Dashboard({
           {isAdmin && onOpenAnalytics && (
             <button style={btn} onClick={onOpenAnalytics}>
               Admin Analytics
+            </button>
+          )}
+          {isAdmin && onOpenAudit && (
+            <button style={btn} onClick={onOpenAudit}>
+              Audit & Compliance
             </button>
           )}
         </div>
