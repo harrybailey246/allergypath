@@ -2,6 +2,9 @@
   "name": "allergypath",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "services/practice-management"
+  ],
   "dependencies": {
     "@supabase/supabase-js": "^2.75.0",
     "@testing-library/dom": "^10.4.1",
