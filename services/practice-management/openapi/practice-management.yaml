@@ -1,0 +1,402 @@
+openapi: 3.1.0
+info:
+  title: Practice Management Service API
+  version: 0.1.0
+servers:
+  - url: https://api.allergypath.local/practice-management
+paths:
+  /appointments:
+    post:
+      operationId: createAppointment
+      summary: Create an appointment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppointment'
+      responses:
+        '201':
+          description: Appointment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+  /appointments/{id}:
+    patch:
+      operationId: updateAppointment
+      summary: Update an appointment
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppointment'
+      responses:
+        '200':
+          description: Appointment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Appointment'
+  /appointment-requests/{id}:resolve:
+    post:
+      operationId: resolveAppointmentRequest
+      summary: Resolve an appointment request
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveAppointmentRequest'
+      responses:
+        '200':
+          description: Request resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentRequestResolution'
+  /partner-checkins:
+    post:
+      operationId: recordPartnerCheckin
+      summary: Record a partner check-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePartnerCheckin'
+      responses:
+        '201':
+          description: Check-in recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerCheckin'
+  /partner-label-queue/{id}:print:
+    post:
+      operationId: recordPartnerLabelPrint
+      summary: Record printing a label queue item
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrintPartnerLabel'
+      responses:
+        '200':
+          description: Label print recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerLabelPrint'
+  /partner-stock-levels/{id}:adjust:
+    post:
+      operationId: adjustPartnerStock
+      summary: Adjust a partner stock level
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustPartnerStock'
+      responses:
+        '200':
+          description: Stock level adjusted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerStockAdjustment'
+  /partner-temperature-logs/import:
+    post:
+      operationId: importPartnerTemperatureLogs
+      summary: Import partner temperature logs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportPartnerTemperatureLogs'
+      responses:
+        '202':
+          description: Temperature logs imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerTemperatureLogImport'
+components:
+  schemas:
+    Appointment:
+      type: object
+      required: [id, startAt, endAt, status, clinician, patient, location]
+      properties:
+        id:
+          type: string
+          format: uuid
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AppointmentStatus'
+        clinician:
+          $ref: '#/components/schemas/ClinicianSummary'
+        patient:
+          $ref: '#/components/schemas/PatientSummary'
+        location:
+          $ref: '#/components/schemas/LocationSummary'
+    CreateAppointment:
+      type: object
+      required: [startAt, endAt, clinicianId, patientId, locationId, status]
+      properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        clinicianId:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AppointmentStatus'
+    UpdateAppointment:
+      type: object
+      properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        clinicianId:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        locationId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/AppointmentStatus'
+    ResolveAppointmentRequest:
+      type: object
+      required: [resolutionType, resolvedBy]
+      properties:
+        resolutionType:
+          $ref: '#/components/schemas/AppointmentResolutionType'
+        resolvedBy:
+          type: string
+          format: uuid
+        notes:
+          type: string
+          maxLength: 500
+    AppointmentRequestResolution:
+      type: object
+      required: [requestId, resolutionType, resolvedBy, resolvedAt]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        resolutionType:
+          $ref: '#/components/schemas/AppointmentResolutionType'
+        resolvedBy:
+          type: string
+          format: uuid
+        resolvedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          maxLength: 500
+    AppointmentStatus:
+      type: string
+      enum: [scheduled, rescheduled, cancelled, completed]
+    AppointmentResolutionType:
+      type: string
+      enum: [approved, declined, needs_follow_up]
+    ClinicianSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    PatientSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    LocationSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    CreatePartnerCheckin:
+      type: object
+      required: [appointmentId, status, occurredAt]
+      properties:
+        appointmentId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PartnerCheckinStatus'
+        occurredAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          maxLength: 500
+    PartnerCheckin:
+      allOf:
+        - $ref: '#/components/schemas/CreatePartnerCheckin'
+        - type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              format: uuid
+    PrintPartnerLabel:
+      type: object
+      required: [printedBy, printerIdentifier]
+      properties:
+        printedBy:
+          type: string
+        printerIdentifier:
+          type: string
+    PartnerLabelPrint:
+      allOf:
+        - $ref: '#/components/schemas/PrintPartnerLabel'
+        - type: object
+          required: [queueId, printedAt]
+          properties:
+            queueId:
+              type: string
+              format: uuid
+            printedAt:
+              type: string
+              format: date-time
+    AdjustPartnerStock:
+      type: object
+      required: [adjustmentType, quantityDelta, adjustedBy]
+      properties:
+        adjustmentType:
+          $ref: '#/components/schemas/PartnerStockAdjustmentType'
+        quantityDelta:
+          type: integer
+        adjustedBy:
+          type: string
+        reason:
+          type: string
+          maxLength: 500
+    PartnerStockAdjustment:
+      allOf:
+        - $ref: '#/components/schemas/AdjustPartnerStock'
+        - type: object
+          required: [id, stockLevelId, adjustedAt]
+          properties:
+            id:
+              type: string
+              format: uuid
+            stockLevelId:
+              type: string
+              format: uuid
+            adjustedAt:
+              type: string
+              format: date-time
+    ImportPartnerTemperatureLogs:
+      type: object
+      required: [partnerId, records]
+      properties:
+        partnerId:
+          type: string
+          format: uuid
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartnerTemperatureLogRecord'
+        source:
+          type: string
+    PartnerTemperatureLogImport:
+      type: object
+      required: [importId, partnerId, importedAt, records]
+      properties:
+        importId:
+          type: string
+          format: uuid
+        partnerId:
+          type: string
+          format: uuid
+        importedAt:
+          type: string
+          format: date-time
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/PartnerTemperatureLogRecord'
+    PartnerTemperatureLogRecord:
+      type: object
+      required: [loggedAt, temperature, unit]
+      properties:
+        loggedAt:
+          type: string
+          format: date-time
+        temperature:
+          type: number
+        unit:
+          type: string
+        probeIdentifier:
+          type: string
+    PartnerCheckinStatus:
+      type: string
+      enum: [arrived, in_room, complete, cancelled]
+    PartnerStockAdjustmentType:
+      type: string
+      enum: [increment, decrement, reset]

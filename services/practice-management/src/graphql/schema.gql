@@ -1,0 +1,104 @@
+type ClinicianSummary {
+  id: ID!
+  name: String!
+}
+
+type PatientSummary {
+  id: ID!
+  name: String!
+}
+
+type LocationSummary {
+  id: ID!
+  name: String!
+}
+
+enum AppointmentStatus {
+  scheduled
+  rescheduled
+  cancelled
+  completed
+}
+
+type PracticeAppointment {
+  id: ID!
+  startAt: String!
+  endAt: String!
+  status: AppointmentStatus!
+  clinician: ClinicianSummary!
+  patient: PatientSummary!
+  location: LocationSummary!
+}
+
+input PracticeScheduleFilter {
+  startAt: String
+  endAt: String
+  clinicianId: ID
+}
+
+type PracticeSchedule {
+  appointments: [PracticeAppointment!]!
+}
+
+enum PartnerCheckinStatus {
+  arrived
+  in_room
+  complete
+  cancelled
+}
+
+type PartnerCheckin {
+  id: ID!
+  appointmentId: ID!
+  status: PartnerCheckinStatus!
+  occurredAt: String!
+  notes: String
+}
+
+type PartnerLabelPrint {
+  queueId: ID!
+  printedBy: String!
+  printedAt: String!
+  printerIdentifier: String!
+}
+
+enum PartnerStockAdjustmentType {
+  increment
+  decrement
+  reset
+}
+
+type PartnerStockAdjustment {
+  id: ID!
+  stockLevelId: ID!
+  adjustmentType: PartnerStockAdjustmentType!
+  quantityDelta: Int!
+  adjustedBy: String!
+  adjustedAt: String!
+  reason: String
+}
+
+type PartnerTemperatureLog {
+  loggedAt: String!
+  temperature: Float!
+  unit: String!
+  probeIdentifier: String
+}
+
+type PartnerDashboardScheduleCard {
+  totalAppointments: Int!
+  arrivedAppointments: Int!
+}
+
+type PartnerDashboard {
+  schedule: PartnerDashboardScheduleCard!
+  checkIns: [PartnerCheckin!]!
+  labelQueue: [PartnerLabelPrint!]!
+  stock: [PartnerStockAdjustment!]!
+  temperatureLogs: [PartnerTemperatureLog!]!
+}
+
+type Query {
+  PracticeSchedule(filter: PracticeScheduleFilter): PracticeSchedule!
+  PartnerDashboard(partnerId: ID!): PartnerDashboard!
+}
