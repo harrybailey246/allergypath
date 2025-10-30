@@ -15,7 +15,9 @@ const createExecutionContext = (request: Record<string, unknown>): ExecutionCont
 
 test("JwtAuthGuard throws when the Authorization header is missing", async () => {
   const requestContext = new RequestContextService();
-  let validateTokenImpl = async () => ({ user: undefined as unknown as AuthenticatedUser });
+  let validateTokenImpl = async (_token: string) => ({
+    user: undefined as unknown as AuthenticatedUser,
+  });
 
   const authService = {
     validateToken: (token: string) => validateTokenImpl(token),
