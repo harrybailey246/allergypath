@@ -1,4 +1,5 @@
-import { getAccessToken } from "@auth0/nextjs-auth0";
+import { AccessTokenError, getAccessToken } from "@auth0/nextjs-auth0";
+import { cookies, headers } from "next/headers";
 
 interface Patient {
   id: string;
@@ -20,37 +21,53 @@ const cards = [
   },
 ];
 
-async function fetchPatients(): Promise<Patient[]> {
+interface PatientsResult {
+  patients: Patient[];
+  error: string | null;
+}
+
+async function fetchPatients(): Promise<PatientsResult> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-  const { accessToken } = await getAccessToken();
+  const cookieStore = cookies();
+  const headerStore = headers();
 
-  if (!accessToken) {
-    throw new Error("Missing access token for API call");
+  try {
+    const { accessToken } = await getAccessToken(cookieStore, headerStore);
+
+    if (!accessToken) {
+      return { patients: [], error: "Sign in to load patients for your clinic." };
+    }
+
+    const response = await fetch(`${apiUrl}/patients`, {
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      return {
+        patients: [],
+        error: `API request failed with status ${response.status}`,
+      };
+    }
+
+    const patients = (await response.json()) as Patient[];
+    return { patients, error: null };
+  } catch (error) {
+    if (error instanceof AccessTokenError && error.code === "login_required") {
+      return { patients: [], error: "Sign in to load patients for your clinic." };
+    }
+
+    return {
+      patients: [],
+      error: error instanceof Error ? error.message : "Unable to load patients",
+    };
   }
-
-  const response = await fetch(`${apiUrl}/patients`, {
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`API request failed with status ${response.status}`);
-  }
-
-  return response.json();
 }
 
 export default async function HomePage() {
-  let patients: Patient[] = [];
-  let error: string | null = null;
-
-  try {
-    patients = await fetchPatients();
-  } catch (err) {
-    error = err instanceof Error ? err.message : "Unable to load patients";
-  }
+  const { patients, error } = await fetchPatients();
 
   return (
     <div className="space-y-10">

@@ -10,16 +10,18 @@ export function Navbar() {
     <nav className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-2 text-sm font-medium text-slate-600">
         <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-          Authenticated
+          {user ? "Signed in" : "Signed out"}
         </span>
-        <span className="text-slate-500">Secure access to the EHR workspace</span>
+        <span className="text-slate-500">
+          {user ? "You're securely connected to your clinic" : "Secure access to the EHR workspace"}
+        </span>
       </div>
       <div className="flex items-center gap-3 text-sm text-slate-600">
         {isLoading ? (
           <span className="text-slate-400">Checking session…</span>
         ) : user ? (
           <>
-            <span className="hidden rounded bg-slate-100 px-3 py-1 font-medium text-slate-700 md:inline-flex">
+            <span className="rounded bg-slate-100 px-3 py-1 font-medium text-slate-700">
               {user.email ?? "Signed in"}
             </span>
             <Link

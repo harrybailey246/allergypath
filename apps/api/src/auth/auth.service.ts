@@ -30,10 +30,16 @@ export class AuthService {
   constructor(private readonly prisma: PrismaService) {}
 
   async validateToken(token: string): Promise<AuthValidationResult> {
-    const { payload } = await jwtVerify(token, this.jwks, {
-      issuer: this.issuerBaseUrl,
-      audience: this.audience,
-    });
+    let payload: JWTPayload;
+
+    try {
+      ({ payload } = await jwtVerify(token, this.jwks, {
+        issuer: this.issuerBaseUrl,
+        audience: this.audience,
+      }));
+    } catch (error) {
+      throw new UnauthorizedException("Invalid access token", { cause: error });
+    }
 
     const email = this.extractEmail(payload);
     const role = this.extractRole(payload);
@@ -97,8 +103,10 @@ export class AuthService {
       return validRoles[0];
     }
 
-    if (USER_ROLES.includes("STAFF")) {
-      return "STAFF";
+    const fallbackRole: UserRole = "STAFF";
+
+    if (USER_ROLES.includes(fallbackRole)) {
+      return fallbackRole;
     }
 
     throw new ForbiddenException("User does not have a valid role");

@@ -6,10 +6,19 @@ const databaseUrl = process.env.DATABASE_URL ?? "postgresql://ehr:ehr@localhost:
 
 const MODELS_WITH_CLINIC_ID = new Set<Prisma.ModelName>(["Patient", "Encounter", "User"]);
 
-const addClinicFilter = (where: Record<string, unknown> | undefined, clinicId: string) => ({
-  ...(where ?? {}),
-  clinicId,
-});
+const mergeWithClinicFilter = (where: Record<string, unknown> | undefined, clinicId: string) => {
+  if (!where || Object.keys(where).length === 0) {
+    return { clinicId };
+  }
+
+  if (typeof where.clinicId === "string") {
+    return { ...where, clinicId };
+  }
+
+  return {
+    AND: [where, { clinicId }],
+  };
+};
 
 const ensureClinicId = (data: unknown, clinicId: string): unknown => {
   if (Array.isArray(data)) {
@@ -49,22 +58,38 @@ export const createClinicIsolationMiddleware = (
         params.action = "findFirst";
         params.args = {
           ...args,
-          where: addClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
+          where: mergeWithClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
         };
         break;
       case "findFirst":
       case "findMany":
+      case "count":
+      case "aggregate":
+      case "groupBy":
+      case "delete":
+      case "deleteMany":
         params.args = {
           ...args,
-          where: addClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
+          where: mergeWithClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
         };
         break;
-      case "create":
+      case "update":
+      case "updateMany":
         params.args = {
           ...args,
+          where: mergeWithClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
           data: ensureClinicId(args.data, clinicId),
         };
         break;
+      case "upsert":
+        params.args = {
+          ...args,
+          where: mergeWithClinicFilter(args.where as Record<string, unknown> | undefined, clinicId),
+          update: ensureClinicId(args.update, clinicId),
+          create: ensureClinicId(args.create, clinicId),
+        };
+        break;
+      case "create":
       case "createMany":
         params.args = {
           ...args,
