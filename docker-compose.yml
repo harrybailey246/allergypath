@@ -1,0 +1,24 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ehr
+      POSTGRES_PASSWORD: ehr
+      POSTGRES_DB: ehr
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./.docker/postgres/data:/var/lib/postgresql/data
+  pgadmin:
+    image: dpage/pgadmin4:8
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@local.test
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+volumes: {}

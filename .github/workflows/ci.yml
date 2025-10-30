@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ehr
+          POSTGRES_PASSWORD: ehr
+          POSTGRES_DB: ehr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ehr" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ehr:ehr@127.0.0.1:5432/ehr
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build --workspace web
+
+      - name: Build API
+        run: npm run build --workspace api
+
+      - name: Run Prisma migrations
+        run: npm run prisma:migrate --workspace api
