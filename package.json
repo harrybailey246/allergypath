@@ -10,5 +10,9 @@
     "lint": "npm run lint --workspace web && npm run lint --workspace api",
     "prisma:migrate": "npm run prisma:migrate --workspace api",
     "vercel-build": "npm run build --workspace web"
+  },
+  "overrides": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
   }
 }
