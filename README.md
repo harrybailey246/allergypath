@@ -1,105 +1,78 @@
-# Getting Started with Create React App
+# EHR Monorepo
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A TypeScript monorepo that groups together the EHR front-end (Next.js), API (NestJS + Prisma), and the legacy Create React App client.
 
-## Environment configuration
+## Repository layout
 
-This project requires Supabase credentials to run locally and in any deployed environment.
+```
+apps/
+  api/   NestJS REST API with Prisma ORM
+  web/   Next.js 14 front-end with Tailwind CSS
+  cra/   Archived CRA project history (read-only)
+```
 
-1. Create a `.env.local` file (this file is already ignored by Git) in the project root if it does not exist.
-2. Add the following variables:
+Additional tooling:
 
-   ```bash
-   REACT_APP_SUPABASE_URL="https://your-project-id.supabase.co"
-   REACT_APP_SUPABASE_ANON_KEY="your-anon-key"
-   RESEND_API_KEY="your-resend-api-key" # used by the notify-email edge function
-   ```
+- `docker-compose.yml` spins up PostgreSQL 16 and pgAdmin 4.
+- `.github/workflows/ci.yml` validates builds and runs Prisma migrations in CI.
 
-For deployments, make sure the same variables are provided by your hosting provider so the application can reach Supabase.
-Additionally, configure the `RESEND_API_KEY` secret in your Supabase project so the `notify-email` edge function can send emails (see below).
+## Prerequisites
 
-## Email notifications & edge functions
+- Node.js 18+
+- npm 9+
+- Docker Desktop or Docker Engine (for the database)
 
-The clinician dashboard and intake form trigger a Supabase Edge Function called `notify-email` whenever submissions are created or their status changes. To deploy and configure the function:
+## Quick start
 
-1. Install the [Supabase CLI](https://supabase.com/docs/guides/cli) and authenticate against your project.
-2. Deploy the edge function:
-
-   ```bash
-   supabase functions deploy notify-email
-   ```
-
-3. Provide the Resend API key (used by the function to send emails) to your Supabase project:
+1. **Install dependencies**
 
    ```bash
-   supabase secrets set RESEND_API_KEY=your-resend-api-key
+   npm install
    ```
 
-4. When developing locally you can run the function with `supabase functions serve notify-email` to verify email behavior (the `RESEND_API_KEY` from `.env.local` will be used if present).
+2. **Provision the database**
 
-## Available Scripts
+   ```bash
+   docker compose up -d
+   ```
 
-In the project directory, you can run:
+   PostgreSQL will listen on `localhost:5432` with credentials `ehr:ehr`. pgAdmin is available at `http://localhost:5050` (username `admin@local.test`, password `admin`).
 
-### `npm start`
+3. **Configure API environment**
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+   Copy the sample Prisma configuration and adjust if necessary:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+   ```bash
+   cp apps/api/.env.example apps/api/.env
+   ```
 
-### `npm test`
+4. **Run the dev servers**
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+   ```bash
+   npm run dev
+   ```
 
-### `npm run build`
+   - Next.js serves the web app on [http://localhost:3000](http://localhost:3000)
+   - NestJS serves the API on [http://localhost:4000](http://localhost:4000)
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+5. **Verify the API**
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+   With the stack running, calling the patients endpoint returns an empty array while the database is empty:
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+   ```bash
+   curl http://localhost:4000/patients
+   ```
 
-### `npm run eject`
+## Prisma workflow
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+After adjusting the schema in `apps/api/prisma/schema.prisma`, run the migration commands:
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm run prisma:migrate --workspace api
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+This executes `prisma migrate deploy` and is also run automatically in CI.
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## Legacy CRA client
 
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+The original Create React App project now lives in `apps/cra/`. Its history is preserved via `git mv`. The project is no longer wired into the development workflow but can still be built or served with its own npm scripts.
