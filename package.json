@@ -8,6 +8,7 @@
     "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspace web && npm run build --workspace api",
     "lint": "npm run lint --workspace web && npm run lint --workspace api",
-    "prisma:migrate": "npm run prisma:migrate --workspace api"
+    "prisma:migrate": "npm run prisma:migrate --workspace api",
+    "vercel-build": "npm run build --workspace web"
   }
 }
