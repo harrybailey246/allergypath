@@ -41,7 +41,7 @@ const ensureClinicId = (data: unknown, clinicId: string): unknown => {
 export const createClinicIsolationMiddleware = (
   getClinicId: () => string | undefined,
 ): Prisma.Middleware => {
-  return async (
+  return (
     params: Prisma.MiddlewareParams,
     next: (params: Prisma.MiddlewareParams) => Prisma.PrismaPromise<unknown>,
   ) => {
