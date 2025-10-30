@@ -43,7 +43,7 @@ export const createClinicIsolationMiddleware = (
 ): Prisma.Middleware => {
   return (
     params: Prisma.MiddlewareParams,
-    next: (params: Prisma.MiddlewareParams) => Prisma.PrismaPromise<unknown>,
+    next: (params: Prisma.MiddlewareParams) => Promise<unknown>,
   ) => {
     const clinicId = getClinicId();
 
