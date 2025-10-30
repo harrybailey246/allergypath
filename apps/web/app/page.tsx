@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 const cards = [
   {
     title: "REST API",
@@ -20,16 +18,15 @@ export default function HomePage() {
         <article key={card.title} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-xl font-semibold text-slate-800">{card.title}</h2>
           <p className="mt-2 text-sm text-slate-600">{card.description}</p>
-          <Link
+          <a
             href={card.href}
-            prefetch={false}
             target="_blank"
             rel="noreferrer"
             className="mt-4 inline-flex w-fit items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
           >
             Visit
             <span aria-hidden>→</span>
-          </Link>
+          </a>
         </article>
       ))}
     </div>
