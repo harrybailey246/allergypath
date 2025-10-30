@@ -1,5 +1,4 @@
-import { AccessTokenError } from "@auth0/nextjs-auth0";
-import { getAccessToken } from "@auth0/nextjs-auth0/edge";
+import { cookies, headers } from "next/headers";
 
 interface Patient {
   id: string;
@@ -26,36 +25,66 @@ interface PatientsResult {
   error: string | null;
 }
 
-async function fetchPatients(): Promise<PatientsResult> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
-  try {
-    const { accessToken } = await getAccessToken();
+interface PatientsRouteResponse {
+  patients?: Patient[];
+  error?: string;
+}
 
-    if (!accessToken) {
+async function fetchPatients(): Promise<PatientsResult> {
+  const headerList = headers();
+  const cookieStore = cookies();
+  const protocol = headerList.get("x-forwarded-proto") ?? "http";
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+
+  if (!host) {
+    return {
+      patients: [],
+      error: "Unable to resolve request host to fetch patients.",
+    };
+  }
+
+  const cookieHeader = cookieStore
+    .getAll()
+    .map(({ name, value }) => `${name}=${value}`)
+    .join("; ");
+
+  const headersInit: Record<string, string> = {
+    "x-forwarded-proto": protocol,
+    "x-forwarded-host": host,
+  };
+
+  if (cookieHeader) {
+    headersInit.cookie = cookieHeader;
+  }
+
+  try {
+    const response = await fetch(`${protocol}://${host}/api/patients`, {
+      cache: "no-store",
+      headers: headersInit,
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as PatientsRouteResponse;
+
+    if (response.status === 401) {
       return { patients: [], error: "Sign in to load patients for your clinic." };
     }
-
-    const response = await fetch(`${apiUrl}/patients`, {
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
 
     if (!response.ok) {
       return {
         patients: [],
-        error: `API request failed with status ${response.status}`,
+        error: payload.error ?? `API request failed with status ${response.status}`,
       };
     }
 
-    const patients = (await response.json()) as Patient[];
-    return { patients, error: null };
-  } catch (error) {
-    if (error instanceof AccessTokenError && error.code === "login_required") {
-      return { patients: [], error: "Sign in to load patients for your clinic." };
+    if (!payload.patients || !Array.isArray(payload.patients)) {
+      return {
+        patients: [],
+        error: "No patients returned by the API.",
+      };
     }
 
+    return { patients: payload.patients, error: null };
+  } catch (error) {
     return {
       patients: [],
       error: error instanceof Error ? error.message : "Unable to load patients",
