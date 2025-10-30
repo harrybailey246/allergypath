@@ -46,7 +46,15 @@ Additional tooling:
    cp apps/api/.env.example apps/api/.env
    ```
 
-4. **Run the dev servers**
+4. **Apply database migrations**
+
+   ```bash
+   npm run prisma:migrate --workspace api
+   ```
+
+   This runs `prisma migrate deploy` so the Postgres schema matches `schema.prisma`.
+
+5. **Run the dev servers**
 
    ```bash
    npm run dev
@@ -55,7 +63,7 @@ Additional tooling:
    - Next.js serves the web app on [http://localhost:3000](http://localhost:3000)
    - NestJS serves the API on [http://localhost:4000](http://localhost:4000)
 
-5. **Verify the API**
+6. **Verify the API**
 
    With the stack running, calling the patients endpoint returns an empty array while the database is empty:
 
